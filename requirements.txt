@@ -1,0 +1,57 @@
+# ViralForge v2.0 - Dependencies
+# Python 3.11+
+
+# === Core ===
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# === Database ===
+sqlalchemy>=2.0.0
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+alembic>=1.13.0
+aiosqlite>=0.20.0
+
+# === API Framework ===
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+httpx>=0.26.0
+python-multipart>=0.0.9
+
+# === Task Queue ===
+celery>=5.3.0
+redis>=5.0.0
+
+# === AI/ML ===
+openai>=1.0.0
+google-generativeai>=0.3.0
+fal-client>=0.4.0
+openai-whisper>=20231117
+
+# === Text-to-Speech ===
+edge-tts>=6.1.0
+elevenlabs>=1.0.0
+
+# === Storage ===
+minio>=7.2.0
+
+# === Audio/Video Processing ===
+pydub>=0.25.0
+mutagen>=1.47.0
+
+# === Scraping ===
+apify-client>=1.6.0
+
+# === CLI ===
+click>=8.1.0
+rich>=13.7.0
+
+# === Utilities ===
+tenacity>=8.2.0
+structlog>=24.1.0
+
+# === Testing ===
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0

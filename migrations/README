@@ -1,0 +1,24 @@
+ViralForge Database Migrations
+==============================
+
+This directory contains Alembic database migrations.
+
+Commands:
+---------
+# Generate new migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one version
+alembic downgrade -1
+
+# Show current version
+alembic current
+
+# Show migration history
+alembic history
+
+Note: The initial schema is in database/init.sql
+Subsequent changes should use Alembic migrations.

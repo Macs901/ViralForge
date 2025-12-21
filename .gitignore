@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+logs/
+
+# Temp files
+data/temp/
+*.tmp
+*.bak
+
+# Docker volumes (local)
+postgres_data/
+redis_data/
+minio_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (nunca commitar!)
+.env.local
+.env.production
+*.pem
+*.key
+credentials.json
