@@ -1337,6 +1337,100 @@ async def search_transcriptions(query: str, limit: int = 20) -> dict[str, Any]:
     return await _run_in_thread(_search_transcriptions_sync, query, limit)
 
 
+# === HTTP REST API para integracao com MacsMorpheus ===
+# O FastMCP usa SSE, mas MacsMorpheus precisa de endpoints HTTP REST
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+# Modelos de request
+class IngestVideoRequest(BaseModel):
+    url: str
+    creator: str
+    niche: str = ""
+
+class GetCreatorTranscriptionsRequest(BaseModel):
+    creator: str
+
+class SearchTranscriptionsRequest(BaseModel):
+    query: str
+    limit: int = 20
+
+class TranscribeVideoRequest(BaseModel):
+    video_id: int
+    language: str = "pt"
+
+class FullPipelineRequest(BaseModel):
+    video_id: int
+
+class SemanticAnalysisRequest(BaseModel):
+    video_id: int
+
+# Cria app FastAPI separada para endpoints REST
+rest_app = FastAPI(title="ViralForge REST API", version="2.1.0")
+
+@rest_app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {"status": "healthy", "service": "viralforge-mcp"}
+
+@rest_app.post("/tools/list_creators")
+async def api_list_creators():
+    """Lista criadores via HTTP."""
+    try:
+        return await list_creators()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/get_creator_transcriptions")
+async def api_get_creator_transcriptions(request: GetCreatorTranscriptionsRequest):
+    """Retorna transcricoes de um criador via HTTP."""
+    try:
+        return await get_creator_transcriptions(request.creator)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/search_transcriptions")
+async def api_search_transcriptions(request: SearchTranscriptionsRequest):
+    """Busca em transcricoes via HTTP."""
+    try:
+        return await search_transcriptions(request.query, request.limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/ingest_video_from_url")
+async def api_ingest_video(request: IngestVideoRequest):
+    """Baixa e registra video via HTTP."""
+    try:
+        return await ingest_video_from_url(request.url, request.creator, request.niche)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/transcribe_video")
+async def api_transcribe_video(request: TranscribeVideoRequest):
+    """Transcreve video via HTTP."""
+    try:
+        return await transcribe_video(request.video_id, request.language)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/full_pipeline")
+async def api_full_pipeline(request: FullPipelineRequest):
+    """Executa pipeline completo via HTTP."""
+    try:
+        return await full_pipeline(request.video_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/get_semantic_analysis")
+async def api_get_semantic_analysis(request: SemanticAnalysisRequest):
+    """Retorna analise semantica via HTTP."""
+    try:
+        return await get_semantic_analysis(request.video_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def run_server(transport: str = "sse") -> None:
     """Run the MCP server with specified transport.
 
@@ -1346,6 +1440,29 @@ def run_server(transport: str = "sse") -> None:
     mcp.run(transport=transport)
 
 
+def run_rest_server(host: str = "0.0.0.0", port: int = 8001) -> None:
+    """Run the REST API server for MacsMorpheus integration.
+
+    Args:
+        host: Host to bind to
+        port: Port to listen on
+    """
+    import uvicorn
+    uvicorn.run(rest_app, host=host, port=port)
+
+
 if __name__ == "__main__":
-    transport = os.getenv("MCP_TRANSPORT", "sse")
-    run_server(transport=transport)
+    import sys
+
+    mode = os.getenv("MCP_MODE", "mcp")
+
+    if mode == "rest" or (len(sys.argv) > 1 and sys.argv[1] == "rest"):
+        # Modo REST para integracao com MacsMorpheus
+        host = os.getenv("REST_HOST", "0.0.0.0")
+        port = int(os.getenv("REST_PORT", "8001"))
+        print(f"Starting ViralForge REST API Server on {host}:{port}")
+        run_rest_server(host, port)
+    else:
+        # Modo MCP padrao (SSE)
+        transport = os.getenv("MCP_TRANSPORT", "sse")
+        run_server(transport=transport)
