@@ -42,8 +42,9 @@ COPY . .
 # Cria diretorios necessarios
 RUN mkdir -p /app/assets/music /app/data/temp
 
-# Expoe porta para API
+# Expoe portas para API e MCP
 EXPOSE 8000
+EXPOSE 8001
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

@@ -1,30 +1,42 @@
-# 🎬 Sistema Autônomo de Vídeos Virais - PRD v2.0
+# ViralForge - Sistema Autonomo de Videos Virais
 
-## ⚡ CHANGELOG v2.0
+Sistema completo para analise, estrategia e producao de videos virais para Instagram Reels, TikTok e YouTube Shorts.
 
-### Novas Funcionalidades
-| Feature | Descrição |
+## Visao Geral
+
+ViralForge e uma plataforma que automatiza todo o pipeline de criacao de videos virais:
+1. **Coleta** videos virais do Instagram via Apify
+2. **Analisa** semanticamente com IA (Gemini/Claude)
+3. **Gera estrategias** de replicacao com GPT-4
+4. **Produz** videos com Veo 3.1 + TTS
+
+## CHANGELOG v2.1
+
+### Novas Funcionalidades v2.1
+| Feature | Descricao |
 |---------|-----------|
-| 🎤 **TTS Integrado** | Narração automática com edge-tts (gratuito) + ElevenLabs (fallback) |
-| 🎵 **Mixagem de Áudio** | FFmpeg mixa narração + música de fundo + vídeo |
-| 📊 **Pré-filtro Estatístico** | Viral Score calculado ANTES de gastar tokens Gemini |
-| ✅ **Validação JSON** | Schemas Pydantic garantem outputs estruturados |
-| 💰 **Budget Awareness** | Controle de custos com abort automático |
-| 📈 **Observabilidade** | Métricas por run, tracking de custos detalhado |
-| 🔄 **Versionamento de Prompts** | Rastreabilidade de qual prompt gerou cada análise |
+| 🎯 **Analise Semantica Completa** | Cores, enquadramento, expressoes, audio, performance |
+| 🎙️ **Groq Whisper** | Transcricao 10x mais rapida e GRATUITA via API |
+| 📝 **Roteiro Sugerido** | Script pronto baseado nos padroes do video |
+| 🔧 **Guia de Replicacao** | Equipamentos, dificuldade, tempo, adaptacoes |
+| 🤖 **MCP Expandido** | Novas tools para analise semantica via Claude |
 
-### Correções Críticas
-- ❌ ~~Vídeos mudos~~ → ✅ Narração TTS sincronizada
-- ❌ ~~JSON inválido do Gemini~~ → ✅ Validação + retry automático
-- ❌ ~~Sem controle de custos~~ → ✅ Budget com abort
-- ❌ ~~Concatenação simples~~ → ✅ Mixagem profissional
+### Funcionalidades v2.0
+| Feature | Descricao |
+|---------|-----------|
+| 🎤 **TTS Integrado** | Narracao automatica com edge-tts (gratuito) + ElevenLabs (fallback) |
+| 🎵 **Mixagem de Audio** | FFmpeg mixa narracao + musica de fundo + video |
+| 📊 **Pre-filtro Estatistico** | Viral Score calculado ANTES de gastar tokens Gemini |
+| ✅ **Validacao JSON** | Schemas Pydantic garantem outputs estruturados |
+| 💰 **Budget Awareness** | Controle de custos com abort automatico |
+| 📈 **Observabilidade** | Metricas por run, tracking de custos detalhado |
 
-### Otimizações para Hardware
-| Componente | Configuração | Motivo |
+### Otimizacoes para Hardware
+| Componente | Configuracao | Motivo |
 |------------|--------------|--------|
-| Whisper | `medium` | CPU-only, 15GB RAM |
-| Celery | `concurrency=2` | Evita OOM com Whisper |
-| PostgreSQL | `shared_buffers=2GB` | Aproveita RAM disponível |
+| Whisper | `medium` ou `groq` | CPU-only ou API gratuita |
+| Celery | `concurrency=2` | Evita OOM com Whisper local |
+| PostgreSQL | `shared_buffers=2GB` | Aproveita RAM disponivel |
 
 ---
 
@@ -73,6 +85,88 @@ docker compose exec worker python main.py status
 
 ---
 
+## MCP Server (ViralForge)
+
+Servidor MCP para integracao com Claude Desktop e outras aplicacoes.
+
+### Tools Disponiveis
+
+| Tool | Descricao |
+|------|-----------|
+| `scrape_profile` | Coleta videos de um perfil Instagram |
+| `analyze_video` | Analisa video com Gemini/Claude |
+| `analyze_video_with_claude` | Forca analise com Claude |
+| `download_video` | Baixa video do Instagram |
+| `transcribe_video` | Transcreve audio (local ou Groq) |
+| `full_pipeline` | Download + Transcricao + Analise |
+| `get_video_for_analysis` | Retorna video + metadados para analise direta |
+| `get_semantic_analysis` | Retorna analise semantica completa |
+| `generate_strategy` | Gera estrategia de replicacao |
+| `produce_video` | Produz video final |
+| `get_budget_status` | Status do orcamento |
+| `list_videos` | Lista videos coletados |
+| `list_strategies` | Lista estrategias geradas |
+
+### Configuracao Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "viralforge": {
+      "command": "python",
+      "args": ["-m", "src.mcp.server"],
+      "cwd": "/home/marcocardoso/projects/ViralForge",
+      "env": {"PYTHONPATH": "/home/marcocardoso/projects/ViralForge"}
+    }
+  }
+}
+```
+
+### Configuracao Docker (SSE)
+
+```bash
+# Container rodando em http://localhost:8002/sse
+docker compose up -d mcp
+```
+
+---
+
+## Analise Semantica Completa
+
+A analise de video inclui:
+
+### Elementos Visuais
+- Cores dominantes e paleta cromatica
+- Enquadramento (close, medio, aberto)
+- Iluminacao (natural, artificial, ring light)
+- Texto na tela (fonte, cor, posicao, timing)
+- Transicoes e cortes por minuto
+
+### Elementos de Audio
+- Tipo de voz (direta, voz off, mista)
+- Tom de voz (intimo, energetico, didatico)
+- Musica (tipo, volume, timing)
+- Efeitos sonoros
+
+### Elementos de Performance
+- Expressoes faciais
+- Linguagem corporal
+- Contato visual com camera
+- Nivel de energia
+- Bordoes e frases de efeito
+
+### Guia de Replicacao
+- Equipamentos necessarios
+- Nivel de dificuldade
+- Tempo estimado de producao
+- Elementos-chave para copiar
+- Sugestoes de adaptacao
+
+### Roteiro Sugerido
+- Script pronto de 30-60s baseado nos padroes do video
+
+---
+
 ## 💰 Custos Estimados
 
 | Cenário | Custo/Mês |
@@ -102,9 +196,9 @@ Instagram
     │ (score >= 0.6)
     ▼
 ┌─────────────┐
-│ PROCESSOR   │ ◄─── Whisper local (GRÁTIS)
-│ (Download+  │
-│  Transcrição)│
+│ PROCESSOR   │ ◄─── Whisper local ou Groq (GRATIS)
+│ (Download+  │      Groq: 10x mais rapido
+│  Transcricao)│
 └─────────────┘
     │
     ▼
@@ -143,10 +237,16 @@ final_video.mp4
 - **Qualidade** - Vozes Microsoft neurais
 - **Fallback** - ElevenLabs se necessário
 
-### Por que Whisper medium?
-- **CPU-only** - Sem GPU na VPS
-- **15GB RAM** - large-v3 seria lento demais
-- **Qualidade** - Suficiente para PT-BR
+### Por que Groq Whisper como opcao?
+- **Gratuito** - Tier gratuito generoso
+- **10x mais rapido** - API vs processamento local
+- **Sem GPU** - Nao precisa de recursos locais
+- **Fallback** - Whisper local disponivel se necessario
+
+### Por que Whisper medium (local)?
+- **Offline** - Funciona sem internet
+- **Privacidade** - Dados nao saem do servidor
+- **Sem limites** - Sem rate limiting
 
 ### Por que pré-filtro estatístico?
 - **Economia** - 50% menos tokens Gemini
@@ -169,6 +269,71 @@ final_video.mp4
 
 ---
 
-**Versão:** 2.0.0  
-**Data:** Dezembro 2024  
+---
+
+## Integracao com MacsMorpheus
+
+ViralForge e MacsMorpheus sao projetos integrados que compartilham um banco de dados unificado de transcricoes.
+
+| Projeto | Proposito | Funcionalidades |
+|---------|-----------|-----------------|
+| **ViralForge** | Analise e producao de videos virais | Scraping, analise semantica, estrategia, producao |
+| **MacsMorpheus** | Assistente multi-agentes via WhatsApp | Bot WhatsApp, tarefas, copywriting, marketing |
+
+### Arquitetura de Integracao
+
+```
+MacsMorpheus                          ViralForge
+┌─────────────────┐                  ┌─────────────────────┐
+│   Copywriter    │ ──── HTTP ────► │   MCP Server        │
+│   Agent         │                  │   (porta 8001)      │
+└─────────────────┘                  └─────────────────────┘
+        │                                     │
+        │                                     ▼
+        │                            ┌─────────────────────┐
+        │                            │   PostgreSQL        │
+        │                            │   (banco unificado) │
+        │                            └─────────────────────┘
+        │                                     │
+        └─────────────────────────────────────┘
+              Transcricoes unificadas
+```
+
+### MCP Tools para Integracao
+
+Novas tools expostas via HTTP para consumo pelo MacsMorpheus:
+
+| Tool | Endpoint | Descricao |
+|------|----------|-----------|
+| `ingest_video_from_url` | POST /tools/ingest_video_from_url | Baixa video de YouTube/TikTok/Instagram |
+| `list_creators` | POST /tools/list_creators | Lista criadores com estatisticas |
+| `get_creator_transcriptions` | POST /tools/get_creator_transcriptions | Retorna transcricoes de um criador |
+| `search_transcriptions` | POST /tools/search_transcriptions | Busca full-text com contexto |
+
+### Video Downloaders
+
+ViralForge agora suporta download de multiplas plataformas:
+
+| Plataforma | Biblioteca | Fallbacks |
+|------------|------------|-----------|
+| YouTube | yt-dlp | - |
+| TikTok | yt-dlp | - |
+| Instagram | gallery-dl | Meta Graph API, yt-dlp |
+
+### Divisao de Responsabilidades
+
+| Funcionalidade | Responsavel | Via |
+|----------------|-------------|-----|
+| Download de videos (YouTube/TikTok/Instagram) | ViralForge | MCP Tools |
+| Transcricao de videos | ViralForge | Whisper local/Groq |
+| Banco de transcricoes | ViralForge | PostgreSQL + MCP |
+| Analise de videos virais | ViralForge | Gemini/Claude |
+| Producao de videos | ViralForge | Veo 3.1 + TTS |
+| Transcricao de audios WhatsApp | MacsMorpheus | Groq Whisper |
+| Copywriting e roteiros via chat | MacsMorpheus | Agente Copywriter |
+
+---
+
+**Versao:** 2.1.0
+**Data:** Dezembro 2024
 **Hardware Alvo:** 4 vCPUs, 15GB RAM, CPU-only

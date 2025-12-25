@@ -1,16 +1,28 @@
-"""Tools para transcricao de audio usando Whisper local."""
+"""Tools para transcricao de audio usando Whisper local ou Groq API."""
 
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
-import whisper
 from pydub import AudioSegment
 
 from config.settings import get_settings
 
 settings = get_settings()
+
+
+def _import_whisper():
+    """Import whisper lazily to avoid loading when using Groq."""
+    import whisper
+    return whisper
+
+
+def _import_groq():
+    """Import groq lazily."""
+    from groq import Groq
+    return Groq
 
 
 @dataclass
@@ -24,7 +36,146 @@ class TranscriptionResult:
     segments: list[dict]
 
 
-class WhisperTools:
+class GroqWhisperTools:
+    """Gerenciador de transcricao usando Groq Whisper API (gratis e mais rapido)."""
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        """Inicializa cliente Groq.
+
+        Args:
+            api_key: Groq API key
+            model: Modelo Whisper (whisper-large-v3 ou whisper-large-v3-turbo)
+        """
+        self.api_key = api_key or settings.groq_api_key
+        self.model = model or settings.groq_whisper_model
+        self._client = None
+
+    @property
+    def client(self):
+        """Lazy loading do cliente Groq."""
+        if self._client is None:
+            if not self.api_key:
+                raise RuntimeError("GROQ_API_KEY nao configurado")
+            Groq = _import_groq()
+            self._client = Groq(api_key=self.api_key)
+            print(f"[Groq Whisper] Cliente inicializado com modelo '{self.model}'")
+        return self._client
+
+    def transcribe(
+        self,
+        audio_path: Union[str, Path],
+        language: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """Transcreve audio usando Groq Whisper API.
+
+        Args:
+            audio_path: Caminho do arquivo de audio
+            language: Idioma do audio (ex: "pt", "en")
+
+        Returns:
+            TranscriptionResult com texto e metadados
+        """
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio nao encontrado: {audio_path}")
+
+        # Groq aceita mp3, mp4, m4a, wav, webm - converte se necessario
+        supported_formats = [".mp3", ".mp4", ".m4a", ".wav", ".webm", ".ogg"]
+        if audio_path.suffix.lower() not in supported_formats:
+            audio_path = self._convert_to_mp3(audio_path)
+
+        # Transcreve com Groq
+        with open(audio_path, "rb") as f:
+            transcription = self.client.audio.transcriptions.create(
+                file=(audio_path.name, f.read()),
+                model=self.model,
+                language=language or "pt",
+                response_format="verbose_json",  # Inclui timestamps
+            )
+
+        # Extrai segmentos se disponiveis
+        segments = []
+        if hasattr(transcription, "segments") and transcription.segments:
+            segments = [
+                {
+                    "start": seg.get("start", 0),
+                    "end": seg.get("end", 0),
+                    "text": seg.get("text", "").strip(),
+                }
+                for seg in transcription.segments
+            ]
+
+        # Calcula duracao
+        duration = self._get_audio_duration(audio_path)
+
+        return TranscriptionResult(
+            text=transcription.text.strip() if hasattr(transcription, "text") else str(transcription),
+            language=language or "pt",
+            confidence=0.95,  # Groq nao retorna confianca, assume alta
+            duration_seconds=duration,
+            segments=segments,
+        )
+
+    def transcribe_video(
+        self,
+        video_path: Union[str, Path],
+        language: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """Extrai audio de video e transcreve com Groq.
+
+        Args:
+            video_path: Caminho do arquivo de video
+            language: Idioma do audio
+
+        Returns:
+            TranscriptionResult
+        """
+        video_path = Path(video_path)
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video nao encontrado: {video_path}")
+
+        # Extrai audio para arquivo temporario
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        try:
+            self._extract_audio_from_video(video_path, tmp_path)
+            return self.transcribe(tmp_path, language=language)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    def _convert_to_mp3(self, audio_path: Path) -> Path:
+        """Converte audio para MP3."""
+        output_path = audio_path.with_suffix(".mp3")
+        audio = AudioSegment.from_file(str(audio_path))
+        audio.export(str(output_path), format="mp3")
+        return output_path
+
+    def _extract_audio_from_video(self, video_path: Path, output_path: Path) -> None:
+        """Extrai audio de video usando ffmpeg."""
+        cmd = [
+            "ffmpeg",
+            "-i", str(video_path),
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-ar", "16000",
+            "-ac", "1",
+            "-y",
+            str(output_path),
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
+
+    def _get_audio_duration(self, audio_path: Path) -> float:
+        """Retorna duracao do audio em segundos."""
+        try:
+            audio = AudioSegment.from_file(str(audio_path))
+            return len(audio) / 1000.0
+        except Exception:
+            return 0.0
+
+
+class LocalWhisperTools:
     """Gerenciador de transcricao usando Whisper local."""
 
     def __init__(self, model_name: Optional[str] = None):
@@ -40,9 +191,10 @@ class WhisperTools:
     def model(self):
         """Lazy loading do modelo Whisper."""
         if self._model is None:
-            print(f"[Whisper] Carregando modelo '{self.model_name}'...")
+            whisper = _import_whisper()
+            print(f"[Whisper Local] Carregando modelo '{self.model_name}'...")
             self._model = whisper.load_model(self.model_name)
-            print(f"[Whisper] Modelo carregado!")
+            print(f"[Whisper Local] Modelo carregado!")
         return self._model
 
     def transcribe(
@@ -51,7 +203,7 @@ class WhisperTools:
         language: Optional[str] = None,
         task: str = "transcribe",
     ) -> TranscriptionResult:
-        """Transcreve audio usando Whisper.
+        """Transcreve audio usando Whisper local.
 
         Args:
             audio_path: Caminho do arquivo de audio
@@ -86,7 +238,7 @@ class WhisperTools:
             avg_confidence = sum(
                 seg.get("no_speech_prob", 0) for seg in segments
             ) / len(segments)
-            confidence = 1.0 - avg_confidence  # Inverte (no_speech_prob baixo = alta confianca)
+            confidence = 1.0 - avg_confidence
         else:
             confidence = 0.5
 
@@ -134,7 +286,6 @@ class WhisperTools:
             self._extract_audio_from_video(video_path, tmp_path)
             return self.transcribe(tmp_path, language=language)
         finally:
-            # Limpa arquivo temporario
             if tmp_path.exists():
                 tmp_path.unlink()
 
@@ -147,16 +298,14 @@ class WhisperTools:
 
     def _extract_audio_from_video(self, video_path: Path, output_path: Path) -> None:
         """Extrai audio de video usando pydub/ffmpeg."""
-        import subprocess
-
         cmd = [
             "ffmpeg",
             "-i", str(video_path),
-            "-vn",  # Sem video
-            "-acodec", "pcm_s16le",  # Codec WAV
-            "-ar", "16000",  # 16kHz (ideal para Whisper)
-            "-ac", "1",  # Mono
-            "-y",  # Sobrescreve
+            "-vn",
+            "-acodec", "pcm_s16le",
+            "-ar", "16000",
+            "-ac", "1",
+            "-y",
             str(output_path),
         ]
         subprocess.run(cmd, capture_output=True, check=True)
@@ -169,13 +318,35 @@ class WhisperTools:
         except Exception:
             return 0.0
 
-    @staticmethod
-    def get_available_models() -> list[dict]:
-        """Lista modelos Whisper disponiveis.
+    def detect_language(self, audio_path: Union[str, Path]) -> tuple[str, float]:
+        """Detecta idioma do audio sem transcrever completamente.
+
+        Args:
+            audio_path: Caminho do audio
 
         Returns:
-            Lista de modelos com nome, parametros e requisitos
+            Tuple (language_code, confidence)
         """
+        whisper = _import_whisper()
+        audio_path = Path(audio_path)
+
+        # Carrega audio e pega apenas os primeiros 30 segundos
+        audio = whisper.load_audio(str(audio_path))
+        audio = whisper.pad_or_trim(audio)
+
+        # Gera mel spectrogram
+        mel = whisper.log_mel_spectrogram(audio).to(self.model.device)
+
+        # Detecta idioma
+        _, probs = self.model.detect_language(mel)
+        detected_lang = max(probs, key=probs.get)
+        confidence = probs[detected_lang]
+
+        return detected_lang, round(confidence, 2)
+
+    @staticmethod
+    def get_available_models() -> list[dict]:
+        """Lista modelos Whisper disponiveis."""
         return [
             {
                 "name": "tiny",
@@ -229,30 +400,80 @@ class WhisperTools:
             },
         ]
 
-    def detect_language(self, audio_path: Union[str, Path]) -> tuple[str, float]:
-        """Detecta idioma do audio sem transcrever completamente.
+
+class WhisperTools:
+    """Gerenciador unificado de transcricao - escolhe provider baseado em config."""
+
+    def __init__(
+        self,
+        provider: Optional[Literal["local", "groq"]] = None,
+        model_name: Optional[str] = None,
+    ):
+        """Inicializa WhisperTools.
 
         Args:
-            audio_path: Caminho do audio
+            provider: Provider de transcricao (local ou groq). Se None, usa config.
+            model_name: Nome do modelo (para local Whisper)
+        """
+        self.provider = provider or settings.whisper_provider
+        self._local_tools: Optional[LocalWhisperTools] = None
+        self._groq_tools: Optional[GroqWhisperTools] = None
+        self._model_name = model_name
+
+    @property
+    def _tools(self):
+        """Retorna o provider apropriado."""
+        if self.provider == "groq":
+            if self._groq_tools is None:
+                self._groq_tools = GroqWhisperTools()
+            return self._groq_tools
+        else:
+            if self._local_tools is None:
+                self._local_tools = LocalWhisperTools(self._model_name)
+            return self._local_tools
+
+    def transcribe(
+        self,
+        audio_path: Union[str, Path],
+        language: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """Transcreve audio usando o provider configurado.
+
+        Args:
+            audio_path: Caminho do arquivo de audio
+            language: Idioma do audio
 
         Returns:
-            Tuple (language_code, confidence)
+            TranscriptionResult
         """
-        audio_path = Path(audio_path)
+        return self._tools.transcribe(audio_path, language=language)
 
-        # Carrega audio e pega apenas os primeiros 30 segundos
-        audio = whisper.load_audio(str(audio_path))
-        audio = whisper.pad_or_trim(audio)
+    def transcribe_video(
+        self,
+        video_path: Union[str, Path],
+        language: Optional[str] = None,
+    ) -> TranscriptionResult:
+        """Extrai audio de video e transcreve.
 
-        # Gera mel spectrogram
-        mel = whisper.log_mel_spectrogram(audio).to(self.model.device)
+        Args:
+            video_path: Caminho do arquivo de video
+            language: Idioma do audio
 
-        # Detecta idioma
-        _, probs = self.model.detect_language(mel)
-        detected_lang = max(probs, key=probs.get)
-        confidence = probs[detected_lang]
+        Returns:
+            TranscriptionResult
+        """
+        return self._tools.transcribe_video(video_path, language=language)
 
-        return detected_lang, round(confidence, 2)
+    def with_provider(self, provider: Literal["local", "groq"]) -> "WhisperTools":
+        """Retorna nova instancia com provider especifico.
+
+        Args:
+            provider: Provider desejado
+
+        Returns:
+            Nova instancia WhisperTools
+        """
+        return WhisperTools(provider=provider, model_name=self._model_name)
 
 
 # Singleton para uso global
@@ -262,14 +483,36 @@ whisper_tools = WhisperTools()
 def transcribe_audio(
     audio_path: Union[str, Path],
     language: Optional[str] = None,
+    provider: Optional[Literal["local", "groq"]] = None,
 ) -> TranscriptionResult:
-    """Funcao de conveniencia para transcricao."""
-    return whisper_tools.transcribe(audio_path, language=language)
+    """Funcao de conveniencia para transcricao.
+
+    Args:
+        audio_path: Caminho do audio
+        language: Idioma
+        provider: Provider especifico (sobrescreve config)
+
+    Returns:
+        TranscriptionResult
+    """
+    tools = whisper_tools if provider is None else whisper_tools.with_provider(provider)
+    return tools.transcribe(audio_path, language=language)
 
 
 def transcribe_video(
     video_path: Union[str, Path],
     language: Optional[str] = None,
+    provider: Optional[Literal["local", "groq"]] = None,
 ) -> TranscriptionResult:
-    """Funcao de conveniencia para transcricao de video."""
-    return whisper_tools.transcribe_video(video_path, language=language)
+    """Funcao de conveniencia para transcricao de video.
+
+    Args:
+        video_path: Caminho do video
+        language: Idioma
+        provider: Provider especifico (sobrescreve config)
+
+    Returns:
+        TranscriptionResult
+    """
+    tools = whisper_tools if provider is None else whisper_tools.with_provider(provider)
+    return tools.transcribe_video(video_path, language=language)

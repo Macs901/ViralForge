@@ -25,9 +25,11 @@ redis>=5.0.0
 
 # === AI/ML ===
 openai>=1.0.0
+anthropic>=0.40.0
 google-generativeai>=0.3.0
 fal-client>=0.4.0
 openai-whisper>=20231117
+groq>=0.9.0
 
 # === Text-to-Speech ===
 edge-tts>=6.1.0
@@ -43,6 +45,10 @@ mutagen>=1.47.0
 # === Scraping ===
 apify-client>=1.6.0
 
+# === Video Downloaders ===
+yt-dlp>=2024.1.0
+gallery-dl>=1.26.0
+
 # === CLI ===
 click>=8.1.0
 rich>=13.7.0
@@ -50,6 +56,9 @@ rich>=13.7.0
 # === Utilities ===
 tenacity>=8.2.0
 structlog>=24.1.0
+
+# === MCP Integration ===
+mcp>=1.25.0
 
 # === Testing ===
 pytest>=7.4.0

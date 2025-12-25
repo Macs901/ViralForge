@@ -262,7 +262,9 @@ class WatcherAgent:
 
         # Calcula recency (decai ao longo de 7 dias)
         if video.posted_at:
-            days_old = (datetime.now() - video.posted_at).days
+            # Usa replace para remover timezone info se presente
+            posted_at_naive = video.posted_at.replace(tzinfo=None) if video.posted_at.tzinfo else video.posted_at
+            days_old = (datetime.now() - posted_at_naive).days
             video.recency_score = Decimal(str(max(1.0 - (days_old / 7.0), 0.0)))
         else:
             video.recency_score = Decimal("0.5")

@@ -1,20 +1,24 @@
 """Tasks de analise do ViralForge."""
 
-from src.agents import analyst_agent, strategist_agent
+from typing import Optional
+
+from src.agents import get_analyst_agent, strategist_agent
 from src.tasks.celery_app import celery_app
 from src.tools import budget_tools
 
 
 @celery_app.task(bind=True, max_retries=2)
-def analyze_video(self, video_id: int, force: bool = False):
+def analyze_video(self, video_id: int, force: bool = False, provider: Optional[str] = None):
     """Analisa um video especifico.
 
     Args:
         video_id: ID do video
         force: Se True, reanalisa mesmo se ja analisado
+        provider: Provider de analise (gemini ou claude)
     """
     try:
-        result = analyst_agent.analyze(video_id, force=force)
+        agent = get_analyst_agent(provider=provider)
+        result = agent.analyze(video_id, force=force)
         return {
             "run_id": result.run_id,
             "video_id": result.video_id,
@@ -22,30 +26,34 @@ def analyze_video(self, video_id: int, force: bool = False):
             "replicability_score": result.replicability_score,
             "is_valid": result.is_valid,
             "cost_usd": result.cost_usd,
+            "provider": agent.provider,
         }
     except Exception as exc:
         self.retry(exc=exc, countdown=120 * (self.request.retries + 1))
 
 
 @celery_app.task
-def analyze_pending_videos(limit: int = 10):
+def analyze_pending_videos(limit: int = 10, provider: Optional[str] = None):
     """Analisa videos pendentes.
 
     Args:
         limit: Maximo de videos a analisar
+        provider: Provider de analise (gemini ou claude)
     """
     # Verifica budget
     status = budget_tools.get_daily_status()
     if status["budget"]["exceeded"]:
         return {"status": "skipped", "reason": "budget_exceeded"}
 
-    results = analyst_agent.analyze_pending(limit=limit)
+    agent = get_analyst_agent(provider=provider)
+    results = agent.analyze_pending(limit=limit)
 
     return {
         "status": "completed",
         "videos_analyzed": len(results),
         "valid_analyses": sum(1 for r in results if r.is_valid),
         "total_cost_usd": sum(r.cost_usd for r in results),
+        "provider": agent.provider,
     }
 
 

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "viralforge": {
+      "url": "https://viralforge-mcp.macspark.dev/sse",
+      "transport": {
+        "type": "sse"
+      }
+    }
+  }
+}

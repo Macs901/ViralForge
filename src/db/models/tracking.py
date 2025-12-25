@@ -140,9 +140,13 @@ class RunMetrics(Base):
     def complete(self, success: bool = True, error: Optional[str] = None) -> None:
         """Marca a execucao como completa."""
         self.completed_at = datetime.now()
-        self.duration_seconds = Decimal(
-            str((self.completed_at - self.started_at).total_seconds())
-        )
+        # Calcula duracao apenas se started_at estiver disponivel
+        if self.started_at is not None:
+            self.duration_seconds = Decimal(
+                str((self.completed_at - self.started_at).total_seconds())
+            )
+        else:
+            self.duration_seconds = Decimal("0")
         self.status = RunStatus.COMPLETED.value if success else RunStatus.FAILED.value
         if error:
             self.error_message = error

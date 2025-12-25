@@ -72,6 +72,15 @@ class VideoAnalysis(Base):
     # Elementos de Audio
     audio_elements: Mapped[Optional[dict]] = mapped_column(JSONB)
 
+    # Elementos de Performance
+    performance_elements: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    # Guia de Replicacao
+    replication_guide: Mapped[Optional[dict]] = mapped_column(JSONB)
+
+    # Sugestao de Roteiro
+    script_suggestion: Mapped[Optional[str]] = mapped_column(Text)
+
     # Scores calculados (0.00 a 1.00)
     virality_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(3, 2), index=True)
     replicability_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(3, 2))

@@ -104,13 +104,15 @@ def add_profile(username: str, niche: str, priority: int):
 @cli.command()
 @click.argument("video_id", type=int)
 @click.option("--force", "-f", is_flag=True, help="Reanalisar mesmo se ja analisado")
-def analyze(video_id: int, force: bool):
+@click.option("--provider", "-p", type=click.Choice(["gemini", "claude"]), help="Provider de analise")
+def analyze(video_id: int, force: bool, provider: Optional[str]):
     """Analisa um video especifico."""
-    from src.agents import analyst_agent
+    from src.agents import get_analyst_agent
 
     try:
-        result = analyst_agent.analyze(video_id, force=force)
-        click.echo(f"✅ Analise concluida!")
+        agent = get_analyst_agent(provider=provider)
+        result = agent.analyze(video_id, force=force)
+        click.echo(f"✅ Analise concluida! (provider: {agent.provider})")
         click.echo(f"   Virality Score: {result.virality_score:.2f}")
         click.echo(f"   Replicability Score: {result.replicability_score:.2f}")
         click.echo(f"   Valido: {'Sim' if result.is_valid else 'Nao'}")
@@ -122,12 +124,14 @@ def analyze(video_id: int, force: bool):
 
 @cli.command()
 @click.option("--limit", "-l", default=10, help="Maximo de videos a analisar")
-def analyze_pending(limit: int):
+@click.option("--provider", "-p", type=click.Choice(["gemini", "claude"]), help="Provider de analise")
+def analyze_pending(limit: int, provider: Optional[str]):
     """Analisa videos pendentes que passaram no pre-filtro."""
-    from src.agents import analyst_agent
+    from src.agents import get_analyst_agent
 
-    click.echo("🧠 Analisando videos pendentes...")
-    results = analyst_agent.analyze_pending(limit=limit)
+    agent = get_analyst_agent(provider=provider)
+    click.echo(f"🧠 Analisando videos pendentes com {agent.provider}...")
+    results = agent.analyze_pending(limit=limit)
 
     valid = sum(1 for r in results if r.is_valid)
     total_cost = sum(r.cost_usd for r in results)

@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     app_debug: bool = Field(default=True, alias="APP_DEBUG")
     log_level: str = "INFO"
     timezone: str = Field(default="America/Sao_Paulo", alias="TZ")
+    api_token: Optional[str] = Field(default=None, alias="API_TOKEN")
+    api_rate_limit_window_seconds: int = Field(
+        default=60, alias="API_RATE_LIMIT_WINDOW"
+    )
+    api_rate_limit_max_requests: int = Field(
+        default=120, alias="API_RATE_LIMIT_MAX"
+    )
 
     # === DATABASE ===
     database_url: str = Field(
@@ -52,9 +59,22 @@ class Settings(BaseSettings):
     # Apify - Instagram Scraping
     apify_token: str = Field(default="", alias="APIFY_TOKEN")
 
+    # Meta Graph API - Instagram Business (optional, for downloader fallback)
+    meta_access_token: Optional[str] = Field(default=None, alias="META_ACCESS_TOKEN")
+
     # Google Gemini - Video Analysis
     google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
     gemini_model: str = Field(default="gemini-1.5-pro", alias="GEMINI_MODEL")
+
+    # Anthropic - Claude (Video Analysis alternative)
+    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-sonnet-4-20250514", alias="ANTHROPIC_MODEL")
+
+    # Video Analysis Provider (gemini | claude)
+    video_analysis_provider: Literal["gemini", "claude"] = Field(
+        default="gemini",
+        alias="VIDEO_ANALYSIS_PROVIDER"
+    )
 
     # OpenAI - Strategy Generation
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
@@ -117,9 +137,20 @@ class Settings(BaseSettings):
     tts_pitch: str = Field(default="+0Hz", alias="TTS_PITCH")
 
     # === WHISPER ===
+    whisper_provider: Literal["local", "groq"] = Field(
+        default="local",
+        alias="WHISPER_PROVIDER",
+        description="Provider de transcricao: local (Whisper local) ou groq (Groq API, gratis e mais rapido)"
+    )
     whisper_model: Literal["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"] = Field(
         default="medium",
         alias="WHISPER_MODEL"
+    )
+    groq_api_key: Optional[str] = Field(default=None, alias="GROQ_API_KEY")
+    groq_whisper_model: str = Field(
+        default="whisper-large-v3",
+        alias="GROQ_WHISPER_MODEL",
+        description="Modelo Whisper no Groq: whisper-large-v3 ou whisper-large-v3-turbo"
     )
 
     # === CELERY ===
@@ -135,6 +166,7 @@ class Settings(BaseSettings):
     cost_veo_test: Decimal = Decimal("0.25")
     cost_veo_production: Decimal = Decimal("0.50")
     cost_gemini_per_video: Decimal = Decimal("0.002")
+    cost_claude_per_video: Decimal = Decimal("0.005")  # Claude Sonnet ~$3/1M input tokens
     cost_gpt4o_per_strategy: Decimal = Decimal("0.01")
     cost_elevenlabs_per_1k_chars: Decimal = Decimal("0.30")
     cost_apify_per_1k: Decimal = Decimal("2.30")
@@ -170,6 +202,11 @@ class Settings(BaseSettings):
         """Retorna custo por cena baseado no modo."""
         return self.cost_veo_test if self.veo_mode == "test" else self.cost_veo_production
 
+    @property
+    def video_analysis_cost(self) -> Decimal:
+        """Retorna custo por analise baseado no provider."""
+        return self.cost_claude_per_video if self.video_analysis_provider == "claude" else self.cost_gemini_per_video
+
     def ensure_directories(self) -> None:
         """Garante que todos os diretorios necessarios existem."""
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -182,8 +219,15 @@ class Settings(BaseSettings):
 
         if not self.apify_token:
             missing.append("APIFY_TOKEN")
-        if not self.google_api_key:
-            missing.append("GOOGLE_API_KEY")
+
+        # Valida key do provider de analise escolhido
+        if self.video_analysis_provider == "claude":
+            if not self.anthropic_api_key:
+                missing.append("ANTHROPIC_API_KEY")
+        else:
+            if not self.google_api_key:
+                missing.append("GOOGLE_API_KEY")
+
         if not self.openai_api_key:
             missing.append("OPENAI_API_KEY")
         if not self.fal_key:
