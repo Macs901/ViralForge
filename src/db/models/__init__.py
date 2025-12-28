@@ -32,6 +32,7 @@ from src.db.models.trends import (
     TrendStatus,
     TrendType,
 )
+from src.db.models.style import ContentRhythm, StyleAnalysis, StyleProfile, ToneType
 from src.db.models.video import ViralVideo
 
 __all__ = [
@@ -73,4 +74,9 @@ __all__ = [
     "ExecutionLog",
     "DailyCounter",
     "SystemConfig",
+    # Style
+    "StyleProfile",
+    "StyleAnalysis",
+    "ToneType",
+    "ContentRhythm",
 ]

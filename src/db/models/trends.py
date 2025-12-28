@@ -70,7 +70,7 @@ class Trend(Base):
     related_hashtags: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
     related_audios: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
     example_videos: Mapped[Optional[list]] = mapped_column(JSONB, default=list)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    extra_data: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
 
     # Historico de scores
     score_history: Mapped[Optional[list]] = mapped_column(JSONB, default=list)

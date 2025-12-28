@@ -18,6 +18,11 @@ from src.tools.whisper_tools import (
     transcribe_video,
     whisper_tools,
 )
+from src.tools.style_tools import style_mcp
+from src.tools.performance_tools import performance_mcp
+from src.tools.competitor_tools import competitor_mcp
+from src.tools.publishing_tools import publishing_mcp
+from src.tools.twitter_scraper import twitter_mcp
 
 __all__ = [
     # Storage
@@ -52,4 +57,14 @@ __all__ = [
     "BudgetTools",
     "BudgetExceededError",
     "budget_tools",
+    # Style
+    "style_mcp",
+    # Performance
+    "performance_mcp",
+    # Competitor
+    "competitor_mcp",
+    # Publishing
+    "publishing_mcp",
+    # Twitter
+    "twitter_mcp",
 ]
