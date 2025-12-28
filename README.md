@@ -271,19 +271,19 @@ final_video.mp4
 
 ---
 
-## Integracao com MacsMorpheus
+## Integracao com SparkOne
 
-ViralForge e MacsMorpheus sao projetos integrados que compartilham um banco de dados unificado de transcricoes.
+ViralForge e SparkOne sao projetos integrados que compartilham um banco de dados unificado de transcricoes.
 
 | Projeto | Proposito | Funcionalidades |
 |---------|-----------|-----------------|
 | **ViralForge** | Analise e producao de videos virais | Scraping, analise semantica, estrategia, producao |
-| **MacsMorpheus** | Assistente multi-agentes via WhatsApp | Bot WhatsApp, tarefas, copywriting, marketing |
+| **SparkOne** | Assistente multi-agentes via WhatsApp | Bot WhatsApp, tarefas, copywriting, marketing |
 
 ### Arquitetura de Integracao
 
 ```
-MacsMorpheus                          ViralForge
+SparkOne                          ViralForge
 ┌─────────────────┐                  ┌─────────────────────┐
 │   Copywriter    │ ──── HTTP ────► │   MCP Server        │
 │   Agent         │                  │   (porta 8001)      │
@@ -301,7 +301,7 @@ MacsMorpheus                          ViralForge
 
 ### MCP Tools para Integracao
 
-Novas tools expostas via HTTP para consumo pelo MacsMorpheus:
+Novas tools expostas via HTTP para consumo pelo SparkOne:
 
 | Tool | Endpoint | Descricao |
 |------|----------|-----------|
@@ -329,8 +329,8 @@ ViralForge agora suporta download de multiplas plataformas:
 | Banco de transcricoes | ViralForge | PostgreSQL + MCP |
 | Analise de videos virais | ViralForge | Gemini/Claude |
 | Producao de videos | ViralForge | Veo 3.1 + TTS |
-| Transcricao de audios WhatsApp | MacsMorpheus | Groq Whisper |
-| Copywriting e roteiros via chat | MacsMorpheus | Agente Copywriter |
+| Transcricao de audios WhatsApp | SparkOne | Groq Whisper |
+| Copywriting e roteiros via chat | SparkOne | Agente Copywriter |
 
 ---
 

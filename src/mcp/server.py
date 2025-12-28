@@ -923,7 +923,7 @@ async def get_semantic_analysis(video_id: int) -> dict[str, Any]:
     return await _run_in_thread(_get_semantic_analysis_sync, video_id)
 
 
-# === Tools de Integracao Multi-Plataforma (MacsMorpheus) ===
+# === Tools de Integracao Multi-Plataforma (SparkOne) ===
 
 
 def _detect_platform(url: str) -> str:
@@ -1163,7 +1163,7 @@ async def list_creators() -> dict[str, Any]:
     - Quantos foram analisados
     - IDs dos videos
 
-    Util para o MacsMorpheus listar criadores disponiveis para referencia.
+    Util para o SparkOne listar criadores disponiveis para referencia.
     """
     return await _run_in_thread(_list_creators_sync)
 
@@ -1242,7 +1242,7 @@ async def get_creator_transcriptions(creator: str) -> dict[str, Any]:
     Busca videos que mencionam o criador no caption, hashtags ou profile.
     Retorna transcricoes completas com metadados.
 
-    Util para o MacsMorpheus criar roteiros baseados em criadores especificos.
+    Util para o SparkOne criar roteiros baseados em criadores especificos.
 
     Args:
         creator: Nome do criador (@username ou nome parcial)
@@ -1325,7 +1325,7 @@ async def search_transcriptions(query: str, limit: int = 20) -> dict[str, Any]:
     Busca full-text em todas as transcricoes.
     Retorna contexto com a busca destacada.
 
-    Util para o MacsMorpheus encontrar referencias sobre temas especificos.
+    Util para o SparkOne encontrar referencias sobre temas especificos.
 
     Args:
         query: Texto a buscar nas transcricoes
@@ -1337,8 +1337,1210 @@ async def search_transcriptions(query: str, limit: int = 20) -> dict[str, Any]:
     return await _run_in_thread(_search_transcriptions_sync, query, limit)
 
 
-# === HTTP REST API para integracao com MacsMorpheus ===
-# O FastMCP usa SSE, mas MacsMorpheus precisa de endpoints HTTP REST
+# ============================================================================
+# INSTAGRAM COMPLETE SCRAPING TOOLS
+# ============================================================================
+
+from src.tools.instagram_scraper import instagram_scraper, FullScrapingResult
+
+
+def _story_to_dict(story) -> dict[str, Any]:
+    """Serializa ScrapedStory para dict."""
+    return {
+        "story_id": story.story_id,
+        "owner_username": story.owner_username,
+        "media_type": story.media_type,
+        "is_video": story.is_video,
+        "media_url": story.media_url,
+        "video_url": story.video_url,
+        "duration_seconds": story.duration_seconds,
+        "has_music": story.has_music,
+        "music_info": story.music_info,
+        "has_poll": story.has_poll,
+        "has_question": story.has_question,
+        "has_link": story.has_link,
+        "link_url": story.link_url,
+        "mentions": story.mentions,
+        "hashtags": story.hashtags,
+        "taken_at": story.taken_at.isoformat() if story.taken_at else None,
+        "expiring_at": story.expiring_at.isoformat() if story.expiring_at else None,
+    }
+
+
+def _carousel_to_dict(carousel) -> dict[str, Any]:
+    """Serializa ScrapedCarousel para dict."""
+    return {
+        "carousel_id": carousel.carousel_id,
+        "shortcode": carousel.shortcode,
+        "source_url": carousel.source_url,
+        "owner_username": carousel.owner_username,
+        "likes_count": carousel.likes_count,
+        "comments_count": carousel.comments_count,
+        "caption": carousel.caption,
+        "hashtags": carousel.hashtags,
+        "mentions": carousel.mentions,
+        "slide_count": len(carousel.slides),
+        "slides": [
+            {
+                "index": s.index,
+                "media_type": s.media_type,
+                "url": s.url,
+                "is_video": s.is_video,
+                "duration_seconds": s.duration_seconds,
+            }
+            for s in carousel.slides
+        ],
+        "posted_at": carousel.posted_at.isoformat() if carousel.posted_at else None,
+    }
+
+
+def _comment_to_dict(comment) -> dict[str, Any]:
+    """Serializa ScrapedComment para dict."""
+    return {
+        "comment_id": comment.comment_id,
+        "author_username": comment.author_username,
+        "author_full_name": comment.author_full_name,
+        "is_author_verified": comment.is_author_verified,
+        "text": comment.text,
+        "likes_count": comment.likes_count,
+        "replies_count": comment.replies_count,
+        "is_reply": comment.is_reply,
+        "is_pinned": comment.is_pinned,
+        "is_from_creator": comment.is_from_creator,
+        "replies": [_comment_to_dict(r) for r in comment.replies],
+        "created_at": comment.created_at.isoformat() if comment.created_at else None,
+    }
+
+
+def _profile_to_dict(profile) -> dict[str, Any]:
+    """Serializa ScrapedProfile para dict."""
+    return {
+        "instagram_id": profile.instagram_id,
+        "username": profile.username,
+        "full_name": profile.full_name,
+        "biography": profile.biography,
+        "external_url": profile.external_url,
+        "profile_pic_url": profile.profile_pic_url,
+        "follower_count": profile.follower_count,
+        "following_count": profile.following_count,
+        "media_count": profile.media_count,
+        "is_private": profile.is_private,
+        "is_verified": profile.is_verified,
+        "is_business": profile.is_business,
+        "business_category": profile.business_category,
+        "avg_likes": profile.avg_likes,
+        "avg_comments": profile.avg_comments,
+        "engagement_rate": profile.engagement_rate,
+        "top_hashtags": profile.top_hashtags,
+    }
+
+
+@mcp.tool()
+async def scrape_instagram_profile(username: str) -> dict[str, Any]:
+    """Coleta dados completos de um perfil do Instagram.
+
+    Retorna: followers, following, posts, bio, verificacao, categoria de negocio, etc.
+
+    Args:
+        username: Username do perfil (sem @)
+
+    Returns:
+        Dados completos do perfil
+    """
+    def _run() -> dict[str, Any]:
+        profile = instagram_scraper.scrape_profile(username)
+        return _profile_to_dict(profile)
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_instagram_stories(username: str) -> dict[str, Any]:
+    """Coleta stories ativos de um perfil (conteudo efemero 24h).
+
+    Captura: media, musica, polls, perguntas, links, stickers, etc.
+
+    Args:
+        username: Username do perfil (sem @)
+
+    Returns:
+        Lista de stories com todos os dados
+    """
+    def _run() -> dict[str, Any]:
+        stories = instagram_scraper.scrape_stories(username)
+        return {
+            "username": username,
+            "story_count": len(stories),
+            "stories": [_story_to_dict(s) for s in stories],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_instagram_carousels(
+    username: str,
+    max_posts: int = 50,
+) -> dict[str, Any]:
+    """Coleta carrosseis (posts com multiplas midias) de um perfil.
+
+    Retorna cada slide individual com URLs e metricas.
+
+    Args:
+        username: Username do perfil (sem @)
+        max_posts: Maximo de posts a verificar
+
+    Returns:
+        Lista de carrosseis com slides
+    """
+    def _run() -> dict[str, Any]:
+        carousels = instagram_scraper.scrape_carousels(username, max_posts)
+        return {
+            "username": username,
+            "carousel_count": len(carousels),
+            "carousels": [_carousel_to_dict(c) for c in carousels],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_instagram_comments(
+    post_url: str,
+    max_comments: int = 100,
+    include_replies: bool = True,
+) -> dict[str, Any]:
+    """Coleta comentarios de um post/reel do Instagram.
+
+    Inclui: autor, texto, likes, respostas aninhadas, verificacao, etc.
+
+    Args:
+        post_url: URL do post
+        max_comments: Maximo de comentarios
+        include_replies: Incluir respostas
+
+    Returns:
+        Lista de comentarios com replies
+    """
+    def _run() -> dict[str, Any]:
+        comments = instagram_scraper.scrape_comments(post_url, max_comments, include_replies)
+        return {
+            "post_url": post_url,
+            "comment_count": len(comments),
+            "total_with_replies": sum(1 + len(c.replies) for c in comments),
+            "comments": [_comment_to_dict(c) for c in comments],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_instagram_full(
+    username: str,
+    include_stories: bool = True,
+    include_carousels: bool = True,
+    include_comments: bool = True,
+    max_videos: int = 50,
+    max_comments_per_post: int = 50,
+) -> dict[str, Any]:
+    """Coleta TUDO de um perfil do Instagram.
+
+    Scraping completo: perfil, videos/reels, stories, carrosseis, comentarios, audios.
+
+    Args:
+        username: Username do perfil (sem @)
+        include_stories: Coletar stories ativos
+        include_carousels: Coletar carrosseis
+        include_comments: Coletar comentarios dos posts
+        max_videos: Maximo de videos/reels
+        max_comments_per_post: Comentarios por post
+
+    Returns:
+        FullScrapingResult com todos os dados
+    """
+    def _run() -> dict[str, Any]:
+        result = instagram_scraper.scrape_full_profile(
+            username=username,
+            include_stories=include_stories,
+            include_carousels=include_carousels,
+            include_comments=include_comments,
+            max_videos=max_videos,
+            max_comments_per_post=max_comments_per_post,
+        )
+
+        return {
+            "username": username,
+            "profile": _profile_to_dict(result.profile) if result.profile else None,
+            "totals": {
+                "posts": result.total_posts,
+                "videos": result.total_videos,
+                "stories": result.total_stories,
+                "carousels": result.total_carousels,
+                "comments": result.total_comments,
+                "audios": len(result.audios),
+            },
+            "videos": result.videos[:10],  # Limita para nao estourar resposta
+            "stories": [_story_to_dict(s) for s in result.stories],
+            "carousels": [_carousel_to_dict(c) for c in result.carousels],
+            "comments_sample": [_comment_to_dict(c) for c in result.comments[:20]],
+            "audios": [
+                {
+                    "audio_id": a.audio_id,
+                    "title": a.title,
+                    "artist_name": a.artist_name,
+                    "reels_count": a.reels_count,
+                    "is_trending": a.is_trending,
+                }
+                for a in result.audios
+            ],
+            "cost_usd": result.cost_usd,
+            "duration_seconds": result.duration_seconds,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_instagram_hashtag(
+    hashtag: str,
+    max_posts: int = 100,
+) -> dict[str, Any]:
+    """Coleta posts de uma hashtag do Instagram.
+
+    Retorna videos e carrosseis da hashtag.
+
+    Args:
+        hashtag: Hashtag sem #
+        max_posts: Maximo de posts
+
+    Returns:
+        Lista de posts da hashtag
+    """
+    def _run() -> dict[str, Any]:
+        result = instagram_scraper.scrape_hashtag(hashtag, max_posts)
+        return {
+            "hashtag": hashtag,
+            "total_posts": result.total_posts,
+            "videos": result.total_videos,
+            "carousels": result.total_carousels,
+            "video_list": result.videos[:20],  # Limita
+            "carousel_list": [_carousel_to_dict(c) for c in result.carousels[:10]],
+            "cost_usd": result.cost_usd,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def estimate_instagram_scraping_cost(
+    profiles: int = 1,
+    videos_per_profile: int = 50,
+    include_stories: bool = True,
+    include_comments: bool = True,
+    comments_per_post: int = 50,
+) -> dict[str, Any]:
+    """Estima custo de scraping do Instagram.
+
+    Retorna breakdown detalhado de custos por componente.
+
+    Args:
+        profiles: Numero de perfis
+        videos_per_profile: Videos por perfil
+        include_stories: Incluir stories
+        include_comments: Incluir comentarios
+        comments_per_post: Comentarios por post
+
+    Returns:
+        Breakdown de custos em USD
+    """
+    return instagram_scraper.estimate_cost(
+        profiles=profiles,
+        videos_per_profile=videos_per_profile,
+        include_stories=include_stories,
+        include_comments=include_comments,
+        comments_per_post=comments_per_post,
+    )
+
+
+# ============================================================================
+# TIKTOK SCRAPING TOOLS
+# ============================================================================
+
+from src.tools.tiktok_scraper import tiktok_scraper
+
+
+def _tiktok_profile_to_dict(profile) -> dict[str, Any]:
+    """Serializa TikTokProfile para dict."""
+    return {
+        "user_id": profile.user_id,
+        "username": profile.username,
+        "nickname": profile.nickname,
+        "bio": profile.bio,
+        "profile_pic_url": profile.profile_pic_url,
+        "follower_count": profile.follower_count,
+        "following_count": profile.following_count,
+        "likes_count": profile.likes_count,
+        "video_count": profile.video_count,
+        "is_verified": profile.is_verified,
+        "is_private": profile.is_private,
+        "avg_views": profile.avg_views,
+        "avg_likes": profile.avg_likes,
+        "engagement_rate": profile.engagement_rate,
+    }
+
+
+def _tiktok_video_to_dict(video) -> dict[str, Any]:
+    """Serializa TikTokVideo para dict."""
+    return {
+        "video_id": video.video_id,
+        "author_username": video.author_username,
+        "video_url": video.video_url,
+        "download_url": video.download_url,
+        "cover_url": video.cover_url,
+        "title": video.title,
+        "description": video.description,
+        "duration_seconds": video.duration_seconds,
+        "view_count": video.view_count,
+        "like_count": video.like_count,
+        "comment_count": video.comment_count,
+        "share_count": video.share_count,
+        "play_count": video.play_count,
+        "hashtags": video.hashtags,
+        "mentions": video.mentions,
+        "sound_id": video.sound_id,
+        "sound_name": video.sound_name,
+        "sound_author": video.sound_author,
+        "is_ad": video.is_ad,
+        "is_duet": video.is_duet,
+        "is_stitch": video.is_stitch,
+        "created_at": video.created_at.isoformat() if video.created_at else None,
+    }
+
+
+def _tiktok_sound_to_dict(sound) -> dict[str, Any]:
+    """Serializa TikTokSound para dict."""
+    return {
+        "sound_id": sound.sound_id,
+        "title": sound.title,
+        "author": sound.author,
+        "author_name": sound.author_name,
+        "duration_seconds": sound.duration_seconds,
+        "video_count": sound.video_count,
+        "play_url": sound.play_url,
+        "cover_url": sound.cover_url,
+        "is_original": sound.is_original,
+    }
+
+
+@mcp.tool()
+async def scrape_tiktok_profile(username: str) -> dict[str, Any]:
+    """Coleta dados completos de um perfil do TikTok.
+
+    Retorna: followers, following, likes, videos, bio, verificacao, etc.
+
+    Args:
+        username: Username do perfil (sem @)
+
+    Returns:
+        Dados completos do perfil
+    """
+    def _run() -> dict[str, Any]:
+        profile = tiktok_scraper.scrape_profile(username)
+        return _tiktok_profile_to_dict(profile)
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_tiktok_videos(
+    username: str,
+    max_videos: int = 50,
+    min_views: int = 0,
+) -> dict[str, Any]:
+    """Coleta videos de um perfil do TikTok.
+
+    Args:
+        username: Username do perfil (sem @)
+        max_videos: Maximo de videos
+        min_views: Filtro minimo de views
+
+    Returns:
+        Lista de videos com metricas
+    """
+    def _run() -> dict[str, Any]:
+        videos = tiktok_scraper.scrape_videos(username, max_videos, min_views)
+        return {
+            "username": username,
+            "video_count": len(videos),
+            "videos": [_tiktok_video_to_dict(v) for v in videos],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_tiktok_full(
+    username: str,
+    max_videos: int = 50,
+    min_views: int = 0,
+) -> dict[str, Any]:
+    """Coleta TUDO de um perfil do TikTok.
+
+    Scraping completo: perfil, todos os videos, sons usados, metricas.
+
+    Args:
+        username: Username do perfil (sem @)
+        max_videos: Maximo de videos
+        min_views: Filtro minimo de views
+
+    Returns:
+        Resultado completo com perfil e videos
+    """
+    def _run() -> dict[str, Any]:
+        result = tiktok_scraper.scrape_full_profile(username, max_videos, min_views)
+        return {
+            "username": username,
+            "profile": _tiktok_profile_to_dict(result.profile) if result.profile else None,
+            "totals": {
+                "videos": result.total_videos,
+                "likes": result.total_likes,
+                "comments": result.total_comments,
+                "shares": result.total_shares,
+            },
+            "top_sounds": [_tiktok_sound_to_dict(s) for s in result.top_sounds],
+            "top_hashtags": result.top_hashtags,
+            "videos": [_tiktok_video_to_dict(v) for v in result.videos[:20]],  # Limita
+            "duration_seconds": result.duration_seconds,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_tiktok_hashtag(
+    hashtag: str,
+    max_videos: int = 100,
+) -> dict[str, Any]:
+    """Coleta videos de uma hashtag do TikTok.
+
+    Args:
+        hashtag: Hashtag sem #
+        max_videos: Maximo de videos
+
+    Returns:
+        Lista de videos da hashtag
+    """
+    def _run() -> dict[str, Any]:
+        result = tiktok_scraper.scrape_hashtag(hashtag, max_videos)
+        return {
+            "hashtag": hashtag,
+            "video_count": len(result.videos),
+            "videos": [_tiktok_video_to_dict(v) for v in result.videos[:20]],
+            "top_sounds": [_tiktok_sound_to_dict(s) for s in result.top_sounds],
+            "top_hashtags": result.top_hashtags,
+            "duration_seconds": result.duration_seconds,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_trending_sounds(limit: int = 30) -> dict[str, Any]:
+    """Coleta sons/musicas trending no TikTok.
+
+    Args:
+        limit: Maximo de sons
+
+    Returns:
+        Lista de sons trending
+    """
+    def _run() -> dict[str, Any]:
+        sounds = tiktok_scraper.scrape_trending_sounds(limit)
+        return {
+            "sound_count": len(sounds),
+            "sounds": [_tiktok_sound_to_dict(s) for s in sounds],
+        }
+
+    return await _run_in_thread(_run)
+
+
+# ============================================================================
+# YOUTUBE SCRAPING TOOLS
+# ============================================================================
+
+from src.tools.youtube_scraper import youtube_scraper
+
+
+def _youtube_channel_to_dict(channel) -> dict[str, Any]:
+    """Serializa YouTubeChannel para dict."""
+    return {
+        "channel_id": channel.channel_id,
+        "username": channel.username,
+        "title": channel.title,
+        "description": channel.description,
+        "thumbnail_url": channel.thumbnail_url,
+        "banner_url": channel.banner_url,
+        "subscriber_count": channel.subscriber_count,
+        "video_count": channel.video_count,
+        "view_count": channel.view_count,
+        "is_verified": channel.is_verified,
+        "avg_views": channel.avg_views,
+        "avg_likes": channel.avg_likes,
+        "engagement_rate": channel.engagement_rate,
+    }
+
+
+def _youtube_video_to_dict(video) -> dict[str, Any]:
+    """Serializa YouTubeVideo para dict."""
+    return {
+        "video_id": video.video_id,
+        "channel_id": video.channel_id,
+        "channel_title": video.channel_title,
+        "video_url": video.video_url,
+        "thumbnail_url": video.thumbnail_url,
+        "title": video.title,
+        "description": video.description[:200] if video.description else None,
+        "tags": video.tags[:10] if video.tags else [],
+        "hashtags": video.hashtags,
+        "is_short": video.is_short,
+        "view_count": video.view_count,
+        "like_count": video.like_count,
+        "comment_count": video.comment_count,
+        "duration_seconds": video.duration_seconds,
+        "category_id": video.category_id,
+        "category_name": video.category_name,
+        "published_at": video.published_at.isoformat() if video.published_at else None,
+    }
+
+
+@mcp.tool()
+async def scrape_youtube_channel(channel_id: str) -> dict[str, Any]:
+    """Coleta dados de um canal do YouTube.
+
+    Args:
+        channel_id: ID do canal ou @username
+
+    Returns:
+        Dados do canal
+    """
+    def _run() -> dict[str, Any]:
+        channel = youtube_scraper.scrape_channel(channel_id)
+        return _youtube_channel_to_dict(channel)
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_youtube_shorts(
+    channel_id: str,
+    max_shorts: int = 50,
+    min_views: int = 0,
+) -> dict[str, Any]:
+    """Coleta Shorts de um canal do YouTube.
+
+    Args:
+        channel_id: ID do canal ou @username
+        max_shorts: Maximo de shorts
+        min_views: Filtro minimo de views
+
+    Returns:
+        Lista de shorts
+    """
+    def _run() -> dict[str, Any]:
+        shorts = youtube_scraper.scrape_shorts(channel_id, max_shorts, min_views)
+        return {
+            "channel_id": channel_id,
+            "short_count": len(shorts),
+            "shorts": [_youtube_video_to_dict(s) for s in shorts],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_youtube_videos(
+    channel_id: str,
+    max_videos: int = 50,
+    min_views: int = 0,
+) -> dict[str, Any]:
+    """Coleta videos de um canal do YouTube.
+
+    Args:
+        channel_id: ID do canal ou @username
+        max_videos: Maximo de videos
+        min_views: Filtro minimo de views
+
+    Returns:
+        Lista de videos
+    """
+    def _run() -> dict[str, Any]:
+        videos = youtube_scraper.scrape_videos(channel_id, max_videos, min_views)
+        return {
+            "channel_id": channel_id,
+            "video_count": len(videos),
+            "videos": [_youtube_video_to_dict(v) for v in videos],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_youtube_full(
+    channel_id: str,
+    max_videos: int = 50,
+    max_shorts: int = 50,
+) -> dict[str, Any]:
+    """Coleta TUDO de um canal do YouTube.
+
+    Scraping completo: canal, videos, shorts, metricas.
+
+    Args:
+        channel_id: ID do canal ou @username
+        max_videos: Maximo de videos
+        max_shorts: Maximo de shorts
+
+    Returns:
+        Resultado completo
+    """
+    def _run() -> dict[str, Any]:
+        result = youtube_scraper.scrape_full_channel(channel_id, max_videos, max_shorts)
+        return {
+            "channel_id": channel_id,
+            "channel": _youtube_channel_to_dict(result.channel) if result.channel else None,
+            "totals": {
+                "videos": result.total_videos,
+                "shorts": result.total_shorts,
+            },
+            "videos": [_youtube_video_to_dict(v) for v in result.videos[:20]],
+            "shorts": [_youtube_video_to_dict(s) for s in result.shorts[:20]],
+            "duration_seconds": result.duration_seconds,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_trending_shorts(country: str = "BR", limit: int = 50) -> dict[str, Any]:
+    """Coleta Shorts trending do YouTube.
+
+    Args:
+        country: Codigo do pais (BR, US, etc)
+        limit: Maximo de shorts
+
+    Returns:
+        Lista de shorts trending
+    """
+    def _run() -> dict[str, Any]:
+        shorts = youtube_scraper.scrape_trending_shorts(country, limit)
+        return {
+            "country": country,
+            "short_count": len(shorts),
+            "shorts": [_youtube_video_to_dict(s) for s in shorts],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def scrape_youtube_search(
+    query: str,
+    max_results: int = 50,
+    shorts_only: bool = False,
+) -> dict[str, Any]:
+    """Busca videos no YouTube.
+
+    Args:
+        query: Termo de busca
+        max_results: Maximo de resultados
+        shorts_only: Apenas Shorts
+
+    Returns:
+        Lista de videos
+    """
+    def _run() -> dict[str, Any]:
+        videos = youtube_scraper.scrape_search(query, max_results, shorts_only)
+        return {
+            "query": query,
+            "shorts_only": shorts_only,
+            "video_count": len(videos),
+            "videos": [_youtube_video_to_dict(v) for v in videos],
+        }
+
+    return await _run_in_thread(_run)
+
+
+# ============================================================================
+# TREND HUNTER TOOLS
+# ============================================================================
+
+from src.agents.trend_hunter_agent import get_trend_hunter
+from src.db.models.trends import Platform, TrendType, TrendStatus
+
+
+def _trend_to_dict(trend) -> dict[str, Any]:
+    """Serializa Trend/DetectedTrend para dict."""
+    # Detecta se e DetectedTrend (dataclass) ou Trend (ORM)
+    if hasattr(trend, 'id'):
+        # ORM Trend
+        return {
+            "id": trend.id,
+            "name": trend.name,
+            "trend_type": trend.trend_type.value if hasattr(trend.trend_type, 'value') else str(trend.trend_type),
+            "platform": trend.platform.value if hasattr(trend.platform, 'value') else str(trend.platform),
+            "description": trend.description,
+            "current_score": float(trend.current_score) if trend.current_score else None,
+            "velocity": float(trend.velocity) if trend.velocity else None,
+            "volume": trend.volume,
+            "status": trend.status.value if hasattr(trend.status, 'value') else str(trend.status),
+            "is_actionable": trend.is_actionable,
+            "external_id": trend.external_id,
+            "external_url": trend.external_url,
+            "related_hashtags": trend.related_hashtags or [],
+            "example_videos": trend.example_videos or [],
+            "first_detected_at": trend.first_detected_at.isoformat() if trend.first_detected_at else None,
+            "last_updated_at": trend.last_updated_at.isoformat() if trend.last_updated_at else None,
+        }
+    else:
+        # DetectedTrend (dataclass)
+        return {
+            "name": trend.name,
+            "trend_type": trend.trend_type.value if hasattr(trend.trend_type, 'value') else str(trend.trend_type),
+            "platform": trend.platform.value if hasattr(trend.platform, 'value') else str(trend.platform),
+            "description": trend.description,
+            "score": trend.score,
+            "velocity": trend.velocity,
+            "volume": trend.volume,
+            "external_id": trend.external_id,
+            "external_url": trend.external_url,
+            "related_hashtags": trend.related_hashtags,
+            "example_videos": trend.example_videos,
+        }
+
+
+@mcp.tool()
+async def hunt_trends(
+    platforms: str = "instagram,tiktok,youtube",
+    limit_per_platform: int = 20,
+) -> dict[str, Any]:
+    """Detecta tendencias em tempo real em multiplas plataformas.
+
+    Analisa Instagram, TikTok e YouTube para encontrar:
+    - Audios/sons virais
+    - Hashtags em alta
+    - Formatos de conteudo trending
+    - Topicos emergentes
+
+    Args:
+        platforms: Plataformas separadas por virgula (instagram,tiktok,youtube)
+        limit_per_platform: Limite de tendencias por plataforma
+
+    Returns:
+        TrendHunterResult com tendencias detectadas
+    """
+    def _run() -> dict[str, Any]:
+        hunter = get_trend_hunter()
+
+        # Parseia plataformas
+        platform_list = []
+        for p in platforms.split(","):
+            p = p.strip().lower()
+            if p == "instagram":
+                platform_list.append(Platform.INSTAGRAM)
+            elif p == "tiktok":
+                platform_list.append(Platform.TIKTOK)
+            elif p == "youtube":
+                platform_list.append(Platform.YOUTUBE)
+
+        result = hunter.hunt_all(
+            platforms=platform_list if platform_list else None,
+            limit_per_platform=limit_per_platform,
+        )
+
+        return {
+            "run_id": result.run_id,
+            "trends_detected": result.trends_detected,
+            "trends_by_type": result.trends_by_type,
+            "trends_by_platform": result.trends_by_platform,
+            "top_trends": [_trend_to_dict(t) for t in result.top_trends],
+            "duration_seconds": result.duration_seconds,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def get_actionable_trends(
+    platform: str = "",
+    trend_type: str = "",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Retorna tendencias acionaveis (que podem ser replicadas).
+
+    Tendencias acionaveis sao aquelas em status EMERGING, RISING ou PEAK
+    que foram marcadas como replicaveis.
+
+    Args:
+        platform: Filtrar por plataforma (instagram, tiktok, youtube, ou vazio para todas)
+        trend_type: Filtrar por tipo (audio, hashtag, format, topic, challenge, ou vazio para todos)
+        limit: Maximo de resultados
+
+    Returns:
+        Lista de tendencias acionaveis do banco
+    """
+    def _run() -> dict[str, Any]:
+        hunter = get_trend_hunter()
+
+        # Parseia plataforma
+        plat = None
+        if platform:
+            p = platform.strip().lower()
+            if p == "instagram":
+                plat = Platform.INSTAGRAM
+            elif p == "tiktok":
+                plat = Platform.TIKTOK
+            elif p == "youtube":
+                plat = Platform.YOUTUBE
+
+        # Parseia tipo
+        ttype = None
+        if trend_type:
+            t = trend_type.strip().lower()
+            if t == "audio":
+                ttype = TrendType.AUDIO
+            elif t == "hashtag":
+                ttype = TrendType.HASHTAG
+            elif t == "format":
+                ttype = TrendType.FORMAT
+            elif t == "topic":
+                ttype = TrendType.TOPIC
+            elif t == "challenge":
+                ttype = TrendType.CHALLENGE
+
+        trends = hunter.get_actionable_trends(
+            platform=plat,
+            trend_type=ttype,
+            limit=limit,
+        )
+
+        return {
+            "filters": {
+                "platform": platform or "all",
+                "trend_type": trend_type or "all",
+            },
+            "count": len(trends),
+            "trends": [_trend_to_dict(t) for t in trends],
+        }
+
+    return await _run_in_thread(_run)
+
+
+# ============================================================================
+# CONTENT SCHEDULER TOOLS
+# ============================================================================
+
+from src.agents.scheduler_agent import get_scheduler, ContentStatus
+
+
+def _content_queue_to_dict(content) -> dict[str, Any]:
+    """Serializa ContentQueue para dict."""
+    return {
+        "id": content.id,
+        "title": content.title,
+        "video_path": content.video_path,
+        "caption": content.caption,
+        "hashtags": content.hashtags,
+        "target_platforms": content.target_platforms,
+        "scheduled_at": content.scheduled_at.isoformat() if content.scheduled_at else None,
+        "optimal_time_used": content.optimal_time_used,
+        "priority": content.priority,
+        "status": content.status.value if hasattr(content.status, 'value') else str(content.status),
+        "published_at": content.published_at.isoformat() if content.published_at else None,
+        "published_urls": content.published_urls,
+        "error_message": content.error_message,
+        "retry_count": content.retry_count,
+        "strategy_id": content.strategy_id,
+        "production_id": content.production_id,
+        "trend_id": content.trend_id,
+        "created_at": content.created_at.isoformat() if content.created_at else None,
+    }
+
+
+@mcp.tool()
+async def schedule_content(
+    title: str,
+    video_path: str,
+    platforms: str = "instagram",
+    caption: str = "",
+    hashtags: str = "",
+    scheduled_at: str = "",
+    use_optimal_time: bool = True,
+    priority: int = 1,
+) -> dict[str, Any]:
+    """Agenda conteudo para publicacao em multiplas plataformas.
+
+    Usa horarios otimos baseados em estudos de engajamento por plataforma.
+
+    Args:
+        title: Titulo do conteudo
+        video_path: Caminho do video no MinIO
+        platforms: Plataformas separadas por virgula (instagram,tiktok,youtube)
+        caption: Legenda do post
+        hashtags: Hashtags separadas por virgula
+        scheduled_at: Data/hora no formato ISO (YYYY-MM-DDTHH:MM:SS) ou vazio para automatico
+        use_optimal_time: Usar horario otimo se scheduled_at nao fornecido
+        priority: Prioridade 1-5 (5 = mais alta)
+
+    Returns:
+        ScheduleResult com ID e horario agendado
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+
+        # Parseia plataformas
+        platform_list = []
+        for p in platforms.split(","):
+            p = p.strip().lower()
+            if p == "instagram":
+                platform_list.append(Platform.INSTAGRAM)
+            elif p == "tiktok":
+                platform_list.append(Platform.TIKTOK)
+            elif p == "youtube":
+                platform_list.append(Platform.YOUTUBE)
+
+        if not platform_list:
+            platform_list = [Platform.INSTAGRAM]
+
+        # Parseia hashtags
+        hashtag_list = [h.strip() for h in hashtags.split(",") if h.strip()] if hashtags else []
+
+        # Parseia data
+        scheduled_datetime = None
+        if scheduled_at:
+            from datetime import datetime
+            scheduled_datetime = datetime.fromisoformat(scheduled_at)
+
+        result = scheduler.schedule_content(
+            title=title,
+            video_path=video_path,
+            platforms=platform_list,
+            caption=caption if caption else None,
+            hashtags=hashtag_list if hashtag_list else None,
+            scheduled_at=scheduled_datetime,
+            use_optimal_time=use_optimal_time,
+            priority=priority,
+        )
+
+        return {
+            "content_id": result.content_id,
+            "scheduled_at": result.scheduled_at.isoformat(),
+            "platforms": result.platforms,
+            "optimal_time_used": result.optimal_time_used,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def list_scheduled_content(
+    status: str = "",
+    platform: str = "",
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Lista conteudos agendados.
+
+    Args:
+        status: Filtrar por status (scheduled, processing, ready, published, failed, cancelled)
+        platform: Filtrar por plataforma (instagram, tiktok, youtube)
+        limit: Maximo de resultados
+
+    Returns:
+        Lista de conteudos agendados
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+
+        # Parseia status
+        content_status = None
+        if status:
+            s = status.strip().lower()
+            if s == "scheduled":
+                content_status = ContentStatus.SCHEDULED
+            elif s == "processing":
+                content_status = ContentStatus.PROCESSING
+            elif s == "ready":
+                content_status = ContentStatus.READY
+            elif s == "published":
+                content_status = ContentStatus.PUBLISHED
+            elif s == "failed":
+                content_status = ContentStatus.FAILED
+            elif s == "cancelled":
+                content_status = ContentStatus.CANCELLED
+
+        # Parseia plataforma
+        plat = None
+        if platform:
+            p = platform.strip().lower()
+            if p == "instagram":
+                plat = Platform.INSTAGRAM
+            elif p == "tiktok":
+                plat = Platform.TIKTOK
+            elif p == "youtube":
+                plat = Platform.YOUTUBE
+
+        contents = scheduler.list_scheduled(
+            status=content_status,
+            platform=plat,
+            limit=limit,
+        )
+
+        return {
+            "filters": {
+                "status": status or "all",
+                "platform": platform or "all",
+            },
+            "count": len(contents),
+            "contents": [_content_queue_to_dict(c) for c in contents],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def get_optimal_times(
+    platform: str = "instagram",
+    days_ahead: int = 7,
+) -> dict[str, Any]:
+    """Retorna melhores horarios para publicacao nos proximos dias.
+
+    Baseado em estudos de engajamento por plataforma e dia da semana.
+
+    Args:
+        platform: Plataforma (instagram, tiktok, youtube)
+        days_ahead: Quantos dias a frente mostrar
+
+    Returns:
+        Lista de horarios otimos por dia
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+
+        # Parseia plataforma
+        plat = Platform.INSTAGRAM
+        p = platform.strip().lower()
+        if p == "tiktok":
+            plat = Platform.TIKTOK
+        elif p == "youtube":
+            plat = Platform.YOUTUBE
+
+        times = scheduler.get_optimal_times(plat, days_ahead)
+
+        return {
+            "platform": platform,
+            "days_ahead": days_ahead,
+            "optimal_times": times,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def publish_now(content_id: int) -> dict[str, Any]:
+    """Publica conteudo imediatamente (ignora agendamento).
+
+    Args:
+        content_id: ID do conteudo na fila
+
+    Returns:
+        PublishResult com status e URLs publicadas
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+        result = scheduler.publish_content(content_id)
+
+        return {
+            "content_id": result.content_id,
+            "success": result.success,
+            "published_urls": result.published_urls,
+            "error": result.error,
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def get_due_content() -> dict[str, Any]:
+    """Retorna conteudos prontos para publicar (horario passou).
+
+    Util para automatizar publicacao de conteudos agendados.
+
+    Returns:
+        Lista de conteudos que devem ser publicados
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+        contents = scheduler.get_due_content()
+
+        return {
+            "count": len(contents),
+            "contents": [_content_queue_to_dict(c) for c in contents],
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def cancel_scheduled_content(content_id: int) -> dict[str, Any]:
+    """Cancela conteudo agendado.
+
+    Args:
+        content_id: ID do conteudo
+
+    Returns:
+        Status do cancelamento
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+        success = scheduler.cancel_scheduled(content_id)
+
+        return {
+            "content_id": content_id,
+            "success": success,
+            "status": "cancelled" if success else "failed",
+        }
+
+    return await _run_in_thread(_run)
+
+
+@mcp.tool()
+async def reschedule_content(content_id: int, new_time: str) -> dict[str, Any]:
+    """Reagenda conteudo para nova data/hora.
+
+    Args:
+        content_id: ID do conteudo
+        new_time: Nova data/hora no formato ISO (YYYY-MM-DDTHH:MM:SS)
+
+    Returns:
+        Status do reagendamento
+    """
+    def _run() -> dict[str, Any]:
+        scheduler = get_scheduler()
+        from datetime import datetime
+        new_datetime = datetime.fromisoformat(new_time)
+
+        success = scheduler.reschedule(content_id, new_datetime)
+
+        return {
+            "content_id": content_id,
+            "success": success,
+            "new_time": new_time if success else None,
+            "status": "rescheduled" if success else "failed",
+        }
+
+    return await _run_in_thread(_run)
+
+
+# === HTTP REST API para integracao com SparkOne ===
+# O FastMCP usa SSE, mas SparkOne precisa de endpoints HTTP REST
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -1441,7 +2643,7 @@ def run_server(transport: str = "sse") -> None:
 
 
 def run_rest_server(host: str = "0.0.0.0", port: int = 8001) -> None:
-    """Run the REST API server for MacsMorpheus integration.
+    """Run the REST API server for SparkOne integration.
 
     Args:
         host: Host to bind to
@@ -1457,7 +2659,7 @@ if __name__ == "__main__":
     mode = os.getenv("MCP_MODE", "mcp")
 
     if mode == "rest" or (len(sys.argv) > 1 and sys.argv[1] == "rest"):
-        # Modo REST para integracao com MacsMorpheus
+        # Modo REST para integracao com SparkOne
         host = os.getenv("REST_HOST", "0.0.0.0")
         port = int(os.getenv("REST_PORT", "8001"))
         print(f"Starting ViralForge REST API Server on {host}:{port}")

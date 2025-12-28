@@ -263,7 +263,7 @@ services:
       retries: 3
 
   # ============================================
-  # REST API - Integracao com MacsMorpheus
+  # REST API - Integracao com SparkOne
   # ============================================
   rest-api:
     build:
