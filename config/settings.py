@@ -161,6 +161,7 @@ class Settings(BaseSettings):
     data_path: Path = Field(default=Path("data"), alias="DATA_PATH")
     temp_path: Path = Field(default=Path("data/temp"), alias="TEMP_PATH")
     music_path: Path = Field(default=Path("assets/music"), alias="MUSIC_PATH")
+    video_output_dir: Path = Field(default=Path("data/videos"), alias="VIDEO_OUTPUT_DIR")
 
     # === COST CONFIGURATION (USD) ===
     cost_veo_test: Decimal = Decimal("0.25")
@@ -171,7 +172,7 @@ class Settings(BaseSettings):
     cost_elevenlabs_per_1k_chars: Decimal = Decimal("0.30")
     cost_apify_per_1k: Decimal = Decimal("2.30")
 
-    @field_validator("data_path", "temp_path", "music_path", mode="before")
+    @field_validator("data_path", "temp_path", "music_path", "video_output_dir", mode="before")
     @classmethod
     def parse_path(cls, v):
         """Converte string para Path."""
@@ -212,6 +213,7 @@ class Settings(BaseSettings):
         self.data_path.mkdir(parents=True, exist_ok=True)
         self.temp_path.mkdir(parents=True, exist_ok=True)
         self.music_path.mkdir(parents=True, exist_ok=True)
+        self.video_output_dir.mkdir(parents=True, exist_ok=True)
 
     def validate_api_keys(self) -> None:
         """Valida que as API keys necessarias estao configuradas."""
