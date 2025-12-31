@@ -257,10 +257,11 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/sse"]
+      test: ["CMD-SHELL", "timeout 3 curl -sN http://localhost:8001/sse 2>&1 | head -1 | grep -q event"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # ============================================
   # REST API - Integracao com SparkOne
