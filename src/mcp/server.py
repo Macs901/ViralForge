@@ -23,7 +23,13 @@ from src.db.models import (
     StrategyStatus,
     ViralVideo,
 )
-from src.tools import budget_tools, scraping_tools, storage_tools, whisper_tools
+from src.tools import (
+    budget_tools,
+    scraping_tools,
+    sheets_exporter,
+    storage_tools,
+    whisper_tools,
+)
 from src.tools.video_downloader import VideoDownloaderFactory
 
 settings = get_settings()
@@ -464,6 +470,26 @@ async def produce_video(strategy_id: int, mode: str = "test", music_track: Optio
 async def get_budget_status() -> dict[str, Any]:
     """Retorna status atualizado do orcamento diario e contadores."""
     return await _run_in_thread(budget_tools.get_daily_status)
+
+
+@mcp.tool()
+async def export_to_google_sheets(
+    videos_limit: int = 50,
+    strategies_limit: int = 50,
+    productions_limit: int = 50,
+    include_status: bool = True,
+) -> dict[str, Any]:
+    """Exporta videos, estrategias, producoes e status para Google Sheets."""
+
+    def _run() -> dict[str, Any]:
+        return sheets_exporter.export_all(
+            videos_limit=videos_limit,
+            strategies_limit=strategies_limit,
+            productions_limit=productions_limit,
+            include_status=include_status,
+        )
+
+    return await _run_in_thread(_run)
 
 
 def _list_videos_sync(status: str, limit: int) -> list[dict[str, Any]]:

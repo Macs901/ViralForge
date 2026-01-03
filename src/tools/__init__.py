@@ -23,6 +23,7 @@ from src.tools.performance_tools import performance_mcp
 from src.tools.competitor_tools import competitor_mcp
 from src.tools.publishing_tools import publishing_mcp
 from src.tools.twitter_scraper import twitter_mcp
+from src.tools.sheets_tools import GoogleSheetsExporter, sheets_exporter
 
 __all__ = [
     # Storage
@@ -67,4 +68,7 @@ __all__ = [
     "publishing_mcp",
     # Twitter
     "twitter_mcp",
+    # Google Sheets
+    "GoogleSheetsExporter",
+    "sheets_exporter",
 ]

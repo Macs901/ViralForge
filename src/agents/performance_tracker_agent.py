@@ -114,7 +114,7 @@ class PerformanceTrackerAgent:
         return collected
 
     def _collect_instagram_metrics(self, since: datetime) -> int:
-        """Coleta metricas do Instagram."""
+        """Coleta metricas do Instagram via scraper real."""
         collected = 0
         db = get_sync_db()
 
@@ -135,12 +135,10 @@ class PerformanceTrackerAgent:
                     continue
 
                 try:
-                    # Coleta metricas via scraper
                     from src.tools.instagram_scraper import instagram_scraper
 
-                    # TODO: Implementar coleta real via API/scraper
-                    # Por enquanto simula metricas baseadas em post_metrics
-                    metrics = post.post_metrics or {}
+                    # Coleta metricas reais via scraper
+                    metrics = instagram_scraper.get_post_metrics(insta_url)
 
                     if metrics:
                         perf_metric = PerformanceMetric(
@@ -168,6 +166,7 @@ class PerformanceTrackerAgent:
 
                         db.add(perf_metric)
                         collected += 1
+                        print(f"[PerformanceTracker] Instagram {post.id}: {metrics.get('views', 0)} views")
 
                 except Exception as e:
                     print(f"[PerformanceTracker] Erro Instagram post {post.id}: {e}")
@@ -183,7 +182,7 @@ class PerformanceTrackerAgent:
         return collected
 
     def _collect_tiktok_metrics(self, since: datetime) -> int:
-        """Coleta metricas do TikTok."""
+        """Coleta metricas do TikTok via scraper real."""
         collected = 0
         db = get_sync_db()
 
@@ -205,7 +204,7 @@ class PerformanceTrackerAgent:
                 try:
                     from src.tools.tiktok_scraper import tiktok_scraper
 
-                    # Coleta metricas
+                    # Coleta metricas reais via scraper
                     video_info = tiktok_scraper.get_video_info(tiktok_url)
 
                     if video_info:
@@ -214,17 +213,19 @@ class PerformanceTrackerAgent:
                             platform=Platform.TIKTOK,
                             post_id=video_info.video_id,
                             post_url=tiktok_url,
-                            views=video_info.views,
-                            likes=video_info.likes,
-                            comments=video_info.comments,
-                            shares=video_info.shares,
+                            views=video_info.views_count,
+                            likes=video_info.likes_count,
+                            comments=video_info.comments_count,
+                            shares=video_info.shares_count,
+                            saves=video_info.saves_count,
                         )
 
                         # Calcula engagement
                         total_engagement = (
                             perf_metric.likes +
                             perf_metric.comments +
-                            perf_metric.shares
+                            perf_metric.shares +
+                            perf_metric.saves
                         )
                         if perf_metric.views > 0:
                             perf_metric.engagement_rate = Decimal(
@@ -233,6 +234,7 @@ class PerformanceTrackerAgent:
 
                         db.add(perf_metric)
                         collected += 1
+                        print(f"[PerformanceTracker] TikTok {post.id}: {video_info.views_count} views")
 
                 except Exception as e:
                     print(f"[PerformanceTracker] Erro TikTok post {post.id}: {e}")
@@ -247,7 +249,7 @@ class PerformanceTrackerAgent:
         return collected
 
     def _collect_youtube_metrics(self, since: datetime) -> int:
-        """Coleta metricas do YouTube."""
+        """Coleta metricas do YouTube via yt-dlp."""
         collected = 0
         db = get_sync_db()
 
@@ -269,6 +271,7 @@ class PerformanceTrackerAgent:
                 try:
                     from src.tools.youtube_scraper import youtube_scraper
 
+                    # Coleta metricas reais via yt-dlp
                     video_info = youtube_scraper.get_video_info(youtube_url)
 
                     if video_info:
@@ -277,9 +280,9 @@ class PerformanceTrackerAgent:
                             platform=Platform.YOUTUBE,
                             post_id=video_info.video_id,
                             post_url=youtube_url,
-                            views=video_info.views,
-                            likes=video_info.likes,
-                            comments=video_info.comments,
+                            views=video_info.view_count,
+                            likes=video_info.like_count,
+                            comments=video_info.comment_count,
                         )
 
                         # Calcula engagement
@@ -291,6 +294,7 @@ class PerformanceTrackerAgent:
 
                         db.add(perf_metric)
                         collected += 1
+                        print(f"[PerformanceTracker] YouTube {post.id}: {video_info.view_count} views")
 
                 except Exception as e:
                     print(f"[PerformanceTracker] Erro YouTube post {post.id}: {e}")

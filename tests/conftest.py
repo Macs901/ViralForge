@@ -9,11 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-from src.db.models import Base
+from src.core.database import Base
 
 
-# Test database URL (in-memory SQLite for tests)
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+# Test database URL - use PostgreSQL for full compatibility
+# SQLite doesn't support JSONB, so we need PostgreSQL for integration tests
+import os
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://viral_admin:viral_secret@localhost:5432/viral_videos"
+)
 
 
 @pytest.fixture(scope="session")

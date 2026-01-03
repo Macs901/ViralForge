@@ -268,6 +268,36 @@ def status():
     click.echo(f"   ElevenLabs: ${costs['elevenlabs']:.4f}")
 
 
+@cli.command(name="export-sheets")
+@click.option("--videos-limit", "-v", default=50, help="Maximo de videos a exportar")
+@click.option("--strategies-limit", "-s", default=50, help="Maximo de estrategias")
+@click.option("--productions-limit", "-p", default=50, help="Maximo de producoes")
+@click.option("--skip-status", is_flag=True, help="Nao exportar aba de status/budget")
+def export_sheets_command(
+    videos_limit: int,
+    strategies_limit: int,
+    productions_limit: int,
+    skip_status: bool,
+):
+    """Exporta dados principais para Google Sheets."""
+    from src.tools import sheets_exporter
+
+    try:
+        result = sheets_exporter.export_all(
+            videos_limit=videos_limit,
+            strategies_limit=strategies_limit,
+            productions_limit=productions_limit,
+            include_status=not skip_status,
+        )
+    except Exception as e:
+        click.echo(f"❌ Erro ao exportar para Google Sheets: {e}")
+        sys.exit(1)
+
+    click.echo("✅ Export concluido para Google Sheets!")
+    for key, info in result.items():
+        click.echo(f"   {key}: {info.get('rows', 0)} linhas -> {info.get('worksheet')}")
+
+
 @cli.command()
 def init_db():
     """Inicializa o banco de dados."""
@@ -405,6 +435,7 @@ STATUS:
   list-profiles   Listar perfis monitorados
   list-videos     Listar videos coletados
   list-strategies Listar estrategias geradas
+  export-sheets   Exportar videos/estrategias/prodocoes para Google Sheets
 
 SISTEMA:
   init-db         Inicializar banco de dados

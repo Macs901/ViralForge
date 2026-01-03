@@ -65,6 +65,23 @@ class Settings(BaseSettings):
     # Google Gemini - Video Analysis
     google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
     gemini_model: str = Field(default="gemini-1.5-pro", alias="GEMINI_MODEL")
+    google_service_account_json: Optional[str] = Field(
+        default=None, alias="GOOGLE_SERVICE_ACCOUNT_JSON"
+    )
+    google_service_account_file: Optional[str] = Field(
+        default=None, alias="GOOGLE_SERVICE_ACCOUNT_FILE"
+    )
+    google_sheets_spreadsheet_id: Optional[str] = Field(
+        default=None, alias="GOOGLE_SHEETS_SPREADSHEET_ID"
+    )
+    google_sheets_tab_videos: str = Field(default="Videos", alias="GOOGLE_SHEETS_TAB_VIDEOS")
+    google_sheets_tab_strategies: str = Field(
+        default="Strategies", alias="GOOGLE_SHEETS_TAB_STRATEGIES"
+    )
+    google_sheets_tab_productions: str = Field(
+        default="Productions", alias="GOOGLE_SHEETS_TAB_PRODUCTIONS"
+    )
+    google_sheets_tab_status: str = Field(default="Status", alias="GOOGLE_SHEETS_TAB_STATUS")
 
     # Anthropic - Claude (Video Analysis alternative)
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")

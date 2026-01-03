@@ -517,6 +517,73 @@ class YouTubeScraper:
             print(f"[YouTube] Erro ao baixar video: {e}")
             return None
 
+    def get_video_info(self, video_url: str) -> Optional[YouTubeVideo]:
+        """Coleta metricas atualizadas de um video especifico.
+
+        Args:
+            video_url: URL do video YouTube
+
+        Returns:
+            YouTubeVideo com metricas atualizadas ou None
+        """
+        try:
+            import json
+
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    video_url,
+                    "--dump-json",
+                    "--no-download",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if result.returncode != 0:
+                print(f"[YouTube] yt-dlp error: {result.stderr}")
+                return None
+
+            data = json.loads(result.stdout)
+
+            is_short = (
+                data.get("duration", 0) <= 60 or
+                "/shorts/" in video_url or
+                "#shorts" in (data.get("description", "") + data.get("title", "")).lower()
+            )
+
+            published_at = None
+            if data.get("upload_date"):
+                try:
+                    published_at = datetime.strptime(data["upload_date"], "%Y%m%d")
+                except:
+                    pass
+
+            return YouTubeVideo(
+                video_id=data.get("id", ""),
+                channel_id=data.get("channel_id", ""),
+                channel_title=data.get("channel", "") or data.get("uploader", ""),
+                video_url=video_url,
+                thumbnail_url=data.get("thumbnail"),
+                title=data.get("title", ""),
+                description=data.get("description", "")[:500] if data.get("description") else None,
+                tags=data.get("tags", []) or [],
+                hashtags=self._extract_hashtags(
+                    (data.get("description", "") or "") + " " + (data.get("title", "") or "")
+                ),
+                is_short=is_short,
+                view_count=data.get("view_count", 0),
+                like_count=data.get("like_count", 0),
+                comment_count=data.get("comment_count", 0),
+                duration_seconds=data.get("duration"),
+                published_at=published_at,
+            )
+
+        except Exception as e:
+            print(f"[YouTube] Erro ao coletar info do video: {e}")
+            return None
+
     def _extract_hashtags(self, text: str) -> list[str]:
         """Extrai hashtags do texto."""
         if not text:

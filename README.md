@@ -334,6 +334,15 @@ ViralForge agora suporta download de multiplas plataformas:
 
 ---
 
+## Integracao com Google Sheets
+
+- Configure o `.env` com `GOOGLE_SHEETS_SPREADSHEET_ID` e uma service account (`GOOGLE_SERVICE_ACCOUNT_JSON` inline ou `GOOGLE_SERVICE_ACCOUNT_FILE`), compartilhe a planilha com o email da service account.
+- Instale dependencias novas: `pip install -r requirements.txt`.
+- Exporte dados principais com `python main.py export-sheets --videos-limit 50 --strategies-limit 50 --productions-limit 50` (abas: Videos, Strategies, Productions e Status/budget).
+- Tambem disponivel via MCP tool `export_to_google_sheets` (parametros iguais aos do CLI).
+
+---
+
 **Versao:** 2.1.0
 **Data:** Dezembro 2024
 **Hardware Alvo:** 4 vCPUs, 15GB RAM, CPU-only

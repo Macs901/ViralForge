@@ -454,6 +454,81 @@ class TikTokScraper:
             return []
         return re.findall(r"@(\w+)", text)
 
+    def get_video_info(self, video_url: str) -> Optional[TikTokVideo]:
+        """Coleta metricas atualizadas de um video especifico.
+
+        Args:
+            video_url: URL do video TikTok
+
+        Returns:
+            TikTokVideo com metricas atualizadas ou None
+        """
+        try:
+            # Tenta extrair video ID da URL
+            patterns = [
+                r"tiktok\.com/@[\w.]+/video/(\d+)",
+                r"tiktok\.com/t/(\w+)",
+                r"vm\.tiktok\.com/(\w+)",
+            ]
+
+            video_id = None
+            for pattern in patterns:
+                match = re.search(pattern, video_url)
+                if match:
+                    video_id = match.group(1)
+                    break
+
+            # Primeiro tenta com yt-dlp (mais rapido e sem custo)
+            try:
+                import json
+                result = subprocess.run(
+                    [
+                        "yt-dlp",
+                        video_url,
+                        "--dump-json",
+                        "--no-download",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    return TikTokVideo(
+                        video_id=str(data.get("id", video_id or "")),
+                        author_username=data.get("uploader_id", ""),
+                        video_url=data.get("url", video_url),
+                        share_url=video_url,
+                        thumbnail_url=data.get("thumbnail"),
+                        description=data.get("description", ""),
+                        views_count=data.get("view_count", 0),
+                        likes_count=data.get("like_count", 0),
+                        comments_count=data.get("comment_count", 0),
+                        shares_count=data.get("repost_count", 0),
+                        duration_seconds=data.get("duration"),
+                    )
+            except Exception as e:
+                print(f"[TikTok] yt-dlp falhou, tentando Apify: {e}")
+
+            # Fallback para Apify
+            run_input = {
+                "postURLs": [video_url],
+                "resultsPerPage": 1,
+                "shouldDownloadVideos": False,
+            }
+
+            run = self.client.actor(self.VIDEO_SCRAPER).call(run_input=run_input)
+
+            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+                return self._parse_video(item)
+
+            return None
+
+        except Exception as e:
+            print(f"[TikTok] Erro ao coletar info do video: {e}")
+            return None
+
     def estimate_cost(self, profiles: int, videos_per_profile: int = 50) -> dict:
         """Estima custo de scraping."""
         total_videos = profiles * videos_per_profile

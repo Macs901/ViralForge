@@ -782,6 +782,61 @@ class InstagramScraper:
             return []
         return re.findall(r"@(\w+)", text)
 
+    def get_post_metrics(self, post_url: str) -> Optional[dict]:
+        """Coleta metricas atualizadas de um post especifico.
+
+        Args:
+            post_url: URL do post (reel, post, etc)
+
+        Returns:
+            Dict com metricas {views, likes, comments, shares, saves} ou None
+        """
+        try:
+            # Extrai shortcode da URL
+            import re
+            patterns = [
+                r"instagram\.com/p/([A-Za-z0-9_-]+)",
+                r"instagram\.com/reel/([A-Za-z0-9_-]+)",
+                r"instagram\.com/reels/([A-Za-z0-9_-]+)",
+            ]
+
+            shortcode = None
+            for pattern in patterns:
+                match = re.search(pattern, post_url)
+                if match:
+                    shortcode = match.group(1)
+                    break
+
+            if not shortcode:
+                print(f"[Instagram] Nao foi possivel extrair shortcode de: {post_url}")
+                return None
+
+            # Usa Apify para coletar info do post
+            run_input = {
+                "directUrls": [post_url],
+                "resultsType": "posts",
+                "resultsLimit": 1,
+            }
+
+            run = self.client.actor(self.POST_SCRAPER).call(run_input=run_input)
+
+            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
+                return {
+                    "views": item.get("videoPlayCount", 0) or item.get("playCount", 0),
+                    "likes": item.get("likesCount", 0),
+                    "comments": item.get("commentsCount", 0),
+                    "shares": item.get("sharesCount", 0),
+                    "saves": item.get("savesCount", 0),
+                    "shortcode": shortcode,
+                    "collected_at": datetime.now().isoformat(),
+                }
+
+            return None
+
+        except Exception as e:
+            print(f"[Instagram] Erro ao coletar metricas do post: {e}")
+            return None
+
     def estimate_cost(
         self,
         profiles: int = 0,
