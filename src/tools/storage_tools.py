@@ -313,5 +313,28 @@ class StorageTools:
         return self.upload_file(local_path, remote_path)
 
 
-# Singleton para uso global
-storage_tools = StorageTools()
+# Lazy singleton para evitar falha na importacao
+_storage_tools: Optional["StorageTools"] = None
+
+
+def get_storage_tools() -> StorageTools:
+    """Retorna instancia singleton do StorageTools (lazy init)."""
+    global _storage_tools
+    if _storage_tools is None:
+        _storage_tools = StorageTools()
+    return _storage_tools
+
+
+# Alias para compatibilidade (lazy property)
+class _LazyStorageTools:
+    """Wrapper para lazy loading do storage_tools."""
+
+    _instance: Optional[StorageTools] = None
+
+    def __getattr__(self, name: str):
+        if self._instance is None:
+            self._instance = StorageTools()
+        return getattr(self._instance, name)
+
+
+storage_tools = _LazyStorageTools()

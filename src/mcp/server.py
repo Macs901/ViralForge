@@ -777,6 +777,655 @@ async def transcribe_video(
     return await _run_in_thread(_transcribe_video_sync, video_id, lang, prov)
 
 
+# === NOVOS TOOLS: download_video_direct, transcribe_video_direct, analyze_content, generate_script ===
+
+
+def _extract_shortcode_from_url(url: str) -> Optional[str]:
+    """Extrai shortcode de URLs do Instagram/TikTok."""
+    import re
+
+    # Instagram: /p/, /reel/, /tv/
+    match = re.search(r"instagram\.com/(?:p|reel|tv)/([A-Za-z0-9_-]+)", url)
+    if match:
+        return match.group(1)
+
+    # TikTok: /@user/video/
+    match = re.search(r"tiktok\.com/@[^/]+/video/(\d+)", url)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _download_video_direct_sync(
+    video_url: str,
+    shortcode: Optional[str] = None,
+    save_to_minio: bool = True,
+) -> dict[str, Any]:
+    """Baixa video diretamente de URL sem precisar de entrada no banco."""
+    import re
+    import httpx
+
+    try:
+        # Extrai shortcode da URL se nao fornecido
+        if not shortcode:
+            shortcode = _extract_shortcode_from_url(video_url)
+            if not shortcode:
+                # Gera ID unico baseado na URL
+                import hashlib
+                shortcode = hashlib.md5(video_url.encode()).hexdigest()[:12]
+
+        # Cria diretorio temporario
+        tmp_dir = settings.temp_path / "direct_downloads"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        local_path = tmp_dir / f"{shortcode}.mp4"
+
+        # Detecta plataforma e usa downloader apropriado
+        downloaded_path = VideoDownloaderFactory.download_video(
+            url=video_url,
+            creator="direct",
+            output_dir=tmp_dir,
+            meta_api_key=settings.meta_access_token,
+        )
+
+        if not downloaded_path or not downloaded_path.exists():
+            # Fallback: download direto via httpx (para URLs diretas de CDN)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            with httpx.Client(follow_redirects=True, timeout=120) as client:
+                response = client.get(video_url, headers=headers)
+                response.raise_for_status()
+                with open(local_path, "wb") as f:
+                    f.write(response.content)
+            downloaded_path = local_path
+
+        file_size_mb = downloaded_path.stat().st_size / (1024 * 1024)
+
+        # Extrai duracao com ffprobe
+        duration_seconds = None
+        try:
+            import subprocess
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(downloaded_path)
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                duration_seconds = float(result.stdout.strip())
+        except Exception:
+            pass
+
+        result = {
+            "success": True,
+            "shortcode": shortcode,
+            "local_path": str(downloaded_path),
+            "file_size_mb": round(file_size_mb, 2),
+            "duration_seconds": duration_seconds,
+        }
+
+        # Upload para MinIO se solicitado
+        if save_to_minio:
+            remote_path = f"direct/{shortcode}.mp4"
+            minio_path = storage_tools.upload_file(downloaded_path, remote_path)
+            result["minio_path"] = minio_path
+            result["minio_url"] = storage_tools.get_file_url(remote_path, expires_hours=168)
+
+        return result
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "shortcode": shortcode,
+        }
+
+
+@mcp.tool()
+async def download_video_direct(
+    video_url: str,
+    shortcode: str = "",
+    save_to_minio: bool = True,
+) -> dict[str, Any]:
+    """Baixa video diretamente de URL sem precisar de registro no banco de dados.
+
+    Suporta URLs do Instagram (posts, reels), TikTok e YouTube.
+    O video e baixado e opcionalmente salvo no MinIO.
+
+    Args:
+        video_url: URL do video ou post (ex: instagram.com/p/xxx ou URL direta de CDN)
+        shortcode: Codigo do post (opcional, sera extraido da URL se nao fornecido)
+        save_to_minio: Se True, salva no MinIO alem de localmente
+
+    Returns:
+        {success, shortcode, local_path, minio_path?, minio_url?, file_size_mb, duration_seconds}
+    """
+    sc = shortcode if shortcode else None
+    return await _run_in_thread(_download_video_direct_sync, video_url, sc, save_to_minio)
+
+
+def _transcribe_video_direct_sync(
+    video_path: Optional[str] = None,
+    video_url: Optional[str] = None,
+    shortcode: Optional[str] = None,
+    language: str = "pt",
+) -> dict[str, Any]:
+    """Transcreve video diretamente sem precisar de entrada no banco."""
+    from src.tools.whisper_tools import WhisperTools
+
+    try:
+        local_path = None
+
+        # Se tem path local, usa diretamente
+        if video_path:
+            local_path = Path(video_path)
+            if not local_path.exists():
+                return {
+                    "success": False,
+                    "error": f"Arquivo nao encontrado: {video_path}",
+                }
+
+        # Se tem URL ou shortcode, baixa primeiro
+        elif video_url or shortcode:
+            url = video_url
+            if shortcode and not video_url:
+                # Assume Instagram se so tem shortcode
+                url = f"https://www.instagram.com/p/{shortcode}/"
+
+            download_result = _download_video_direct_sync(url, shortcode, save_to_minio=False)
+            if not download_result["success"]:
+                return {
+                    "success": False,
+                    "error": f"Falha no download: {download_result.get('error', 'Desconhecido')}",
+                }
+            local_path = Path(download_result["local_path"])
+            shortcode = download_result["shortcode"]
+
+        else:
+            return {
+                "success": False,
+                "error": "Forneça video_path, video_url ou shortcode",
+            }
+
+        # Transcreve com Whisper
+        tools = WhisperTools()
+        result = tools.transcribe_video(local_path, language=language if language != "pt" else None)
+
+        return {
+            "success": True,
+            "shortcode": shortcode or local_path.stem,
+            "transcript": result.text,
+            "segments": result.segments,
+            "language": result.language,
+            "confidence": result.confidence,
+            "duration_seconds": result.duration_seconds,
+            "word_count": len(result.text.split()),
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@mcp.tool()
+async def transcribe_video_direct(
+    video_path: str = "",
+    video_url: str = "",
+    shortcode: str = "",
+    language: str = "pt",
+) -> dict[str, Any]:
+    """Transcreve o audio de um video usando Whisper sem precisar de registro no banco.
+
+    Pode receber um caminho local, URL do video ou shortcode do Instagram.
+    Se receber URL/shortcode, baixa o video primeiro automaticamente.
+
+    Args:
+        video_path: Caminho local do video (prioridade sobre URL/shortcode)
+        video_url: URL do video (vai baixar primeiro se fornecido)
+        shortcode: Shortcode do Instagram (ex: DJhvlRrvmoo)
+        language: Idioma do audio (pt, en, es, etc). Default: pt
+
+    Returns:
+        {success, shortcode, transcript, segments, language, confidence, duration_seconds, word_count}
+    """
+    path = video_path if video_path else None
+    url = video_url if video_url else None
+    sc = shortcode if shortcode else None
+    return await _run_in_thread(_transcribe_video_direct_sync, path, url, sc, language)
+
+
+# === ANALYZE_CONTENT: Analise de conteudo viral ===
+
+ANALYZE_CONTENT_PROMPT = """Voce e um ESPECIALISTA em analise de conteudo viral para Instagram Reels, TikTok e YouTube Shorts.
+
+Analise o seguinte conteudo e forneça uma analise estruturada focada em PADRÕES DE VIRALIZACAO.
+
+## DADOS DO VIDEO
+- **Legenda:** {caption}
+- **Transcricao:** {transcript}
+- **Metricas:** {metrics}
+
+## ANALISE SOLICITADA
+
+Retorne um JSON com a seguinte estrutura EXATA:
+
+```json
+{{
+    "hook": {{
+        "type": "emotional|curiosity|shock|tutorial|relatable|vulnerability|command",
+        "text": "texto exato do hook usado nos primeiros 3 segundos",
+        "score": 1-10,
+        "why_works": "explicacao detalhada de por que este hook funciona"
+    }},
+    "structure": {{
+        "intro_seconds": numero,
+        "development_seconds": numero,
+        "climax_seconds": numero,
+        "cta_seconds": numero,
+        "pattern": "problema_solucao|antes_depois|lista|storytelling|tutorial|dor_virada"
+    }},
+    "emotional_triggers": ["lista", "de", "gatilhos", "emocionais", "ativados"],
+    "ctas": ["lista de CTAs usados com texto exato"],
+    "viral_elements": [
+        "elemento viral 1 - explicacao",
+        "elemento viral 2 - explicacao",
+        "elemento viral 3 - explicacao"
+    ],
+    "engagement_drivers": {{
+        "comments": "o que leva as pessoas a comentar",
+        "shares": "o que leva a compartilhar",
+        "saves": "o que leva a salvar"
+    }},
+    "replication_tips": [
+        "dica pratica 1 para replicar o sucesso",
+        "dica pratica 2",
+        "dica pratica 3"
+    ],
+    "score_viral": 1-10,
+    "nicho_fit": {{
+        "beleza": 1-10,
+        "lifestyle": 1-10,
+        "motivacional": 1-10,
+        "autocuidado": 1-10,
+        "humor": 1-10,
+        "educativo": 1-10,
+        "entretenimento": 1-10
+    }}
+}}
+```
+
+REGRAS CRITICAS:
+- Retorne APENAS o JSON, sem texto antes ou depois
+- Seja ESPECIFICO nas descricoes, nao generico
+- Considere o contexto BRASILEIRO de redes sociais
+- Scores de 1-10 (nao 0-1)
+"""
+
+
+def _analyze_content_sync(
+    shortcode: Optional[str] = None,
+    transcript: Optional[str] = None,
+    caption: Optional[str] = None,
+    metrics: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Analisa conteudo viral usando Claude."""
+    import json
+    import anthropic
+
+    try:
+        # Se tem shortcode mas nao tem dados, busca do banco
+        if shortcode and (not transcript or not caption):
+            db = get_sync_db()
+            try:
+                stmt = select(ViralVideo).where(ViralVideo.shortcode == shortcode)
+                video = db.execute(stmt).scalar_one_or_none()
+
+                if video:
+                    if not caption:
+                        caption = video.caption or ""
+                    if not transcript and video.transcription:
+                        transcript = video.transcription
+                    if not metrics:
+                        metrics = {
+                            "views": video.views_count,
+                            "likes": video.likes_count,
+                            "comments": video.comments_count,
+                            "shares": video.shares_count or 0,
+                        }
+            finally:
+                db.close()
+
+        # Valida que temos dados suficientes
+        if not transcript and not caption:
+            return {
+                "success": False,
+                "error": "Forneça transcript e/ou caption para analise",
+            }
+
+        # Prepara prompt
+        metrics_str = json.dumps(metrics or {}, ensure_ascii=False)
+        prompt = ANALYZE_CONTENT_PROMPT.format(
+            caption=caption or "Nao disponivel",
+            transcript=transcript or "Nao disponivel",
+            metrics=metrics_str,
+        )
+
+        # Chama Claude
+        if not settings.anthropic_api_key:
+            return {
+                "success": False,
+                "error": "ANTHROPIC_API_KEY nao configurado",
+            }
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        # Extrai texto da resposta
+        response_text = ""
+        for block in response.content:
+            if block.type == "text":
+                response_text += block.text
+
+        # Parseia JSON da resposta
+        json_str = response_text.strip()
+        if "```json" in json_str:
+            json_str = json_str.split("```json")[1].split("```")[0]
+        elif "```" in json_str:
+            json_str = json_str.split("```")[1].split("```")[0]
+
+        # Encontra o JSON na resposta
+        import re
+        match = re.search(r"(\{[\s\S]*\})", json_str)
+        if match:
+            json_str = match.group(1)
+
+        analysis = json.loads(json_str.strip())
+
+        return {
+            "success": True,
+            "shortcode": shortcode,
+            "analysis": analysis,
+            "tokens_used": response.usage.input_tokens + response.usage.output_tokens,
+        }
+
+    except json.JSONDecodeError as e:
+        return {
+            "success": False,
+            "error": f"Erro ao parsear JSON da resposta: {e}",
+            "raw_response": response_text if "response_text" in locals() else None,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@mcp.tool()
+async def analyze_content(
+    shortcode: str = "",
+    transcript: str = "",
+    caption: str = "",
+    metrics: str = "",
+) -> dict[str, Any]:
+    """Analisa conteudo viral usando IA (Claude) para extrair padroes de viralizacao.
+
+    Analisa hooks, CTAs, gatilhos emocionais, estrutura e elementos virais.
+    Pode buscar dados do banco automaticamente se fornecido apenas o shortcode.
+
+    Args:
+        shortcode: Shortcode do video (opcional, busca dados do banco)
+        transcript: Transcricao do video
+        caption: Legenda do post
+        metrics: JSON string com metricas {views, likes, comments, shares}
+
+    Returns:
+        {success, shortcode, analysis: {hook, structure, emotional_triggers, ctas, viral_elements, engagement_drivers, replication_tips, score_viral, nicho_fit}}
+    """
+    import json
+
+    sc = shortcode if shortcode else None
+    trans = transcript if transcript else None
+    cap = caption if caption else None
+    mets = json.loads(metrics) if metrics else None
+
+    return await _run_in_thread(_analyze_content_sync, sc, trans, cap, mets)
+
+
+# === GENERATE_SCRIPT: Geracao de roteiros virais ===
+
+GENERATE_SCRIPT_PROMPT = """Voce e um ROTEIRISTA ESPECIALIZADO em conteudo viral para Instagram Reels e TikTok.
+
+## BRIEFING
+- **Tema:** {topic}
+- **Estilo:** {style}
+- **Duracao alvo:** {duration_seconds} segundos
+- **Estilo de criador de referencia:** {creator_style}
+
+## REFERENCIAS DE VIDEOS VIRAIS ANALISADOS
+{references}
+
+## INSTRUCOES
+
+Crie um roteiro COMPLETO e PRONTO PARA GRAVAR seguindo a estrutura abaixo.
+
+O roteiro deve:
+1. Ter um HOOK FORTE nos primeiros 0.5-3 segundos
+2. Manter a atencao com cortes rapidos e informacao valiosa
+3. Ter um CTA claro no final
+4. Ser NATURAL e CONVERSACIONAL (nao robotico)
+5. Incluir indicacoes visuais para gravacao
+6. Considerar contexto BRASILEIRO
+
+Retorne um JSON com esta estrutura EXATA:
+
+```json
+{{
+    "title": "titulo chamativo para o video",
+    "duration_target": {duration_seconds},
+    "hooks": [
+        {{"type": "curiosity", "text": "hook opcao 1"}},
+        {{"type": "shock", "text": "hook opcao 2"}},
+        {{"type": "relatable", "text": "hook opcao 3"}}
+    ],
+    "intro": {{
+        "duration": "0-3s",
+        "text": "texto falado completo incluindo hook escolhido",
+        "visual": "indicacao visual/acao para gravacao"
+    }},
+    "sections": [
+        {{
+            "duration": "3s-15s",
+            "title": "nome da secao",
+            "text": "texto falado COMPLETO - cada palavra que sera dita",
+            "visual": "indicacao visual detalhada"
+        }},
+        {{
+            "duration": "15s-45s",
+            "title": "desenvolvimento",
+            "text": "texto falado COMPLETO",
+            "visual": "indicacao visual"
+        }}
+    ],
+    "cta": {{
+        "duration": "Xs-{duration_seconds}s",
+        "text": "CTA completo incluindo bordao se aplicavel",
+        "visual": "indicacao visual final"
+    }},
+    "notes": [
+        "dica de gravacao 1",
+        "dica de gravacao 2",
+        "dica de edicao"
+    ],
+    "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5"],
+    "best_time_to_post": "horario recomendado (ex: 12h ou 18h)",
+    "estimated_engagement": "baixo|medio|alto|viral"
+}}
+```
+
+REGRAS CRITICAS:
+- Retorne APENAS o JSON, sem texto antes ou depois
+- O texto de cada secao deve ser COMPLETO - exatamente o que sera falado
+- Inclua TODAS as palavras do roteiro
+- Seja especifico nas indicacoes visuais
+- Os hooks devem ser opcoes DIFERENTES para testar
+"""
+
+
+def _generate_script_sync(
+    topic: str,
+    style: str = "tutorial",
+    duration_seconds: int = 60,
+    reference_shortcodes: Optional[list] = None,
+    creator_style: Optional[str] = None,
+) -> dict[str, Any]:
+    """Gera roteiro de video viral usando Claude."""
+    import json
+    import anthropic
+
+    try:
+        # Busca referencias se fornecidas
+        references = ""
+        if reference_shortcodes:
+            db = get_sync_db()
+            try:
+                for shortcode in reference_shortcodes[:3]:  # Max 3 referencias
+                    stmt = select(ViralVideo).where(ViralVideo.shortcode == shortcode)
+                    video = db.execute(stmt).scalar_one_or_none()
+
+                    if video and video.analysis:
+                        analysis = video.analysis
+                        references += f"\n### Referencia {shortcode}:\n"
+
+                        if analysis.hook_analysis:
+                            hook_data = analysis.hook_analysis
+                            references += f"- Hook: {hook_data.get('first_words', 'N/A')}\n"
+                            references += f"- Tipo: {hook_data.get('opening_type', 'N/A')}\n"
+
+                        if analysis.viral_factors:
+                            viral = analysis.viral_factors
+                            triggers = viral.get('emotional_triggers', [])
+                            references += f"- Gatilhos: {', '.join(triggers[:5])}\n"
+
+                        references += f"- Score viral: {analysis.virality_score}/1.0\n"
+                        references += f"- Metricas: {video.views_count:,} views, {video.likes_count:,} likes\n"
+            finally:
+                db.close()
+
+        if not references:
+            references = "Nenhuma referencia especifica fornecida. Use padroes gerais de videos virais brasileiros."
+
+        # Prepara prompt
+        prompt = GENERATE_SCRIPT_PROMPT.format(
+            topic=topic,
+            style=style,
+            duration_seconds=duration_seconds,
+            creator_style=creator_style or "natural, autentico, conversacional",
+            references=references,
+        )
+
+        # Chama Claude
+        if not settings.anthropic_api_key:
+            return {
+                "success": False,
+                "error": "ANTHROPIC_API_KEY nao configurado",
+            }
+
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        # Extrai texto da resposta
+        response_text = ""
+        for block in response.content:
+            if block.type == "text":
+                response_text += block.text
+
+        # Parseia JSON
+        json_str = response_text.strip()
+        if "```json" in json_str:
+            json_str = json_str.split("```json")[1].split("```")[0]
+        elif "```" in json_str:
+            json_str = json_str.split("```")[1].split("```")[0]
+
+        import re
+        match = re.search(r"(\{[\s\S]*\})", json_str)
+        if match:
+            json_str = match.group(1)
+
+        script = json.loads(json_str.strip())
+
+        return {
+            "success": True,
+            "script": script,
+            "topic": topic,
+            "style": style,
+            "references_used": reference_shortcodes or [],
+            "tokens_used": response.usage.input_tokens + response.usage.output_tokens,
+        }
+
+    except json.JSONDecodeError as e:
+        return {
+            "success": False,
+            "error": f"Erro ao parsear JSON da resposta: {e}",
+            "raw_response": response_text if "response_text" in locals() else None,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@mcp.tool()
+async def generate_script(
+    topic: str,
+    style: str = "tutorial",
+    duration_seconds: int = 60,
+    reference_shortcodes: str = "",
+    creator_style: str = "",
+) -> dict[str, Any]:
+    """Gera roteiro de video baseado em padroes virais analisados.
+
+    Cria um roteiro completo e pronto para gravar, incluindo:
+    - Multiplas opcoes de hooks
+    - Texto completo de cada secao
+    - Indicacoes visuais para gravacao
+    - CTA otimizado
+    - Hashtags sugeridas
+
+    Args:
+        topic: Tema do video (ex: "hidratacao com babosa", "rotina matinal")
+        style: Estilo do video - tutorial, storytelling, grwm, antes_depois, motivacional, lista
+        duration_seconds: Duracao alvo em segundos (30, 60, 90)
+        reference_shortcodes: Lista de shortcodes separados por virgula para usar como referencia
+        creator_style: Estilo de criador para modelar (ex: "intimista", "energetico", "didatico")
+
+    Returns:
+        {success, script: {title, hooks, intro, sections, cta, notes, hashtags, best_time_to_post}}
+    """
+    refs = [s.strip() for s in reference_shortcodes.split(",") if s.strip()] if reference_shortcodes else None
+    cr_style = creator_style if creator_style else None
+
+    return await _run_in_thread(_generate_script_sync, topic, style, duration_seconds, refs, cr_style)
+
+
 def _full_pipeline_sync(video_id: int, analyzer: str = "gemini") -> dict[str, Any]:
     """Executa pipeline completo: download + transcricao + analise."""
     results = {
@@ -2594,6 +3243,58 @@ class FullPipelineRequest(BaseModel):
 class SemanticAnalysisRequest(BaseModel):
     video_id: int
 
+# Novos modelos para os tools adicionais
+class DownloadVideoDirectRequest(BaseModel):
+    video_url: str
+    shortcode: str = ""
+    save_to_minio: bool = True
+
+class TranscribeVideoDirectRequest(BaseModel):
+    video_path: str = ""
+    video_url: str = ""
+    shortcode: str = ""
+    language: str = "pt"
+
+class AnalyzeContentRequest(BaseModel):
+    shortcode: str = ""
+    transcript: str = ""
+    caption: str = ""
+    metrics: str = ""
+
+class GenerateScriptRequest(BaseModel):
+    topic: str
+    style: str = "tutorial"
+    duration_seconds: int = 60
+    reference_shortcodes: str = ""
+    creator_style: str = ""
+
+class ListVideosRequest(BaseModel):
+    status: str = "all"
+    limit: int = 20
+
+class GenerateStrategyRequest(BaseModel):
+    video_id: int
+    niche: Optional[str] = None
+
+class ProduceVideoRequest(BaseModel):
+    strategy_id: int
+    mode: str = "test"
+    music_track: Optional[str] = None
+
+class SaveScriptAsStrategyRequest(BaseModel):
+    """Request para salvar um roteiro gerado como estrategia no banco."""
+    title: str
+    topic: str
+    style: str = "motivacional"
+    hook_script: str
+    development_script: str
+    cta_script: str
+    full_script: str
+    hashtags: list[str] = []
+    caption: str = ""
+    posting_time: str = ""
+    veo_prompts: list[dict] = []
+
 # Cria app FastAPI separada para endpoints REST
 rest_app = FastAPI(title="ViralForge REST API", version="2.1.0")
 
@@ -2655,6 +3356,139 @@ async def api_get_semantic_analysis(request: SemanticAnalysisRequest):
     """Retorna analise semantica via HTTP."""
     try:
         return await get_semantic_analysis(request.video_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/download_video_direct")
+async def api_download_video_direct(request: DownloadVideoDirectRequest):
+    """Baixa video diretamente de URL via HTTP."""
+    try:
+        return await download_video_direct(
+            request.video_url,
+            request.shortcode,
+            request.save_to_minio,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/transcribe_video_direct")
+async def api_transcribe_video_direct(request: TranscribeVideoDirectRequest):
+    """Transcreve video diretamente via HTTP."""
+    try:
+        return await transcribe_video_direct(
+            request.video_path,
+            request.video_url,
+            request.shortcode,
+            request.language,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/analyze_content")
+async def api_analyze_content(request: AnalyzeContentRequest):
+    """Analisa conteudo viral via HTTP."""
+    try:
+        return await analyze_content(
+            request.shortcode,
+            request.transcript,
+            request.caption,
+            request.metrics,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/generate_script")
+async def api_generate_script(request: GenerateScriptRequest):
+    """Gera roteiro de video viral via HTTP."""
+    try:
+        return await generate_script(
+            request.topic,
+            request.style,
+            request.duration_seconds,
+            request.reference_shortcodes,
+            request.creator_style,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/list_videos")
+async def api_list_videos(request: ListVideosRequest):
+    """Lista videos coletados via HTTP."""
+    try:
+        return await list_videos(request.status, request.limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/generate_strategy")
+async def api_generate_strategy(request: GenerateStrategyRequest):
+    """Gera estrategia a partir de video analisado via HTTP."""
+    try:
+        return await generate_strategy(request.video_id, request.niche)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@rest_app.post("/tools/produce_video")
+async def api_produce_video(request: ProduceVideoRequest):
+    """Produz video completo via HTTP."""
+    try:
+        return await produce_video(request.strategy_id, request.mode, request.music_track)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _save_script_as_strategy_sync(request: SaveScriptAsStrategyRequest) -> dict[str, Any]:
+    """Salva um roteiro gerado como estrategia no banco de dados."""
+    from decimal import Decimal
+    db = get_sync_db()
+    try:
+        # Cria a estrategia
+        strategy = GeneratedStrategy(
+            title=request.title,
+            concept=f"Video sobre {request.topic} no estilo {request.style}",
+            target_niche=request.style,
+            hook_script=request.hook_script,
+            hook_duration="0-3s",
+            development_script=request.development_script,
+            development_duration="3-50s",
+            cta_script=request.cta_script,
+            cta_duration="50-60s",
+            full_script=request.full_script,
+            tts_config={
+                "provider": "edge-tts",
+                "voice": "pt-BR-FranciscaNeural",
+                "rate": "+0%",
+                "pitch": "+0Hz",
+            },
+            veo_prompts=request.veo_prompts if request.veo_prompts else [],
+            suggested_hashtags=request.hashtags,
+            suggested_caption=request.caption,
+            best_posting_time=request.posting_time,
+            status="approved",  # Ja aprovado para producao
+            model_used="claude-sonnet-4",
+            estimated_production_cost_usd=Decimal("2.00"),
+            is_valid_json=True,
+        )
+        db.add(strategy)
+        db.commit()
+        db.refresh(strategy)
+
+        return {
+            "success": True,
+            "strategy_id": strategy.id,
+            "title": strategy.title,
+            "status": strategy.status,
+            "message": f"Estrategia salva com ID {strategy.id}. Pronta para producao!"
+        }
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
+@rest_app.post("/tools/save_script_as_strategy")
+async def api_save_script_as_strategy(request: SaveScriptAsStrategyRequest):
+    """Salva um roteiro gerado como estrategia no banco via HTTP."""
+    try:
+        return await _run_in_thread(_save_script_as_strategy_sync, request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
