@@ -19,22 +19,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Instala uv
+RUN pip install --no-cache-dir uv
+
 # Define diretorio de trabalho
 WORKDIR /app
 
-# Copia requirements primeiro (cache de dependencias)
-COPY requirements.txt .
+# Copia manifesto de dependencias (cache layer)
+COPY pyproject.toml uv.lock* /app/
 
-# Instala dependencias Python
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Adiciona click para CLI
-RUN pip install --no-cache-dir click>=8.1.0
+# Instala dependencias Python via uv
+RUN uv sync --frozen || uv sync
 
 # Pre-baixa modelo Whisper medium (otimizado para CPU)
-# Isso acelera a primeira execucao
-RUN python -c "import whisper; whisper.load_model('medium')" || true
+RUN uv run python -c "import whisper; whisper.load_model('medium')" || true
 
 # Copia codigo da aplicacao
 COPY . .
@@ -51,4 +49,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
 # Comando padrao
-CMD ["python", "main.py", "help-commands"]
+CMD ["uv", "run", "python", "main.py", "help-commands"]

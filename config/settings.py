@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     timezone: str = Field(default="America/Sao_Paulo", alias="TZ")
     api_token: Optional[str] = Field(default=None, alias="API_TOKEN")
+    sentry_dsn: Optional[str] = Field(default=None, alias="SENTRY_DSN")
+    otel_exporter_endpoint: Optional[str] = Field(default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT")
     api_rate_limit_window_seconds: int = Field(
         default=60, alias="API_RATE_LIMIT_WINDOW"
     )

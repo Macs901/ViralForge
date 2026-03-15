@@ -5,13 +5,29 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, Tuple
 
+import sentry_sdk
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.settings import get_settings
 from src.api.routes import dashboard, profiles, productions, strategies, videos
+from src.core.telemetry import setup_telemetry
 
 settings = get_settings()
+
+# OpenTelemetry tracing
+setup_telemetry(
+    service_name="viralforge",
+    endpoint=settings.otel_exporter_endpoint,
+)
+
+# Sentry/GlitchTip error tracking
+if getattr(settings, "sentry_dsn", None):
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=0.1,
+        environment=settings.app_env,
+    )
 _rate_hits: dict[str, Tuple[int, float]] = {}
 
 

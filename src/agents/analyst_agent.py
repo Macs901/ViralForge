@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import anthropic
 import google.generativeai as genai
+import instructor
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -342,6 +343,7 @@ REGRAS CRITICAS:
             if not settings.anthropic_api_key:
                 raise RuntimeError("ANTHROPIC_API_KEY nao configurado")
             self.claude_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            self.claude_instructor = instructor.from_anthropic(self.claude_client)
         else:
             if not settings.google_api_key:
                 raise RuntimeError("GOOGLE_API_KEY nao configurado")
@@ -607,7 +609,7 @@ REGRAS CRITICAS:
         return response.text or "", tokens_used
 
     def _call_claude(self, video: ViralVideo, prompt: str) -> tuple[str, int]:
-        """Chama Claude; suporta vision com video se disponivel."""
+        """Chama Claude com instructor para structured output; suporta vision."""
         messages_content = []
 
         # Se tiver video armazenado, tenta usar vision
@@ -635,21 +637,18 @@ REGRAS CRITICAS:
         # Adiciona prompt de texto
         messages_content.append({"type": "text", "text": prompt})
 
-        response = self.claude_client.messages.create(
+        result, completion = self.claude_instructor.messages.create_with_completion(
             model=settings.anthropic_model,
             max_tokens=2000,
+            response_model=GeminiAnalysisOutput,
             messages=[{"role": "user", "content": messages_content}],
+            max_retries=2,
         )
 
-        # Extrai texto da resposta
-        text_output = ""
-        for block in response.content:
-            if block.type == "text":
-                text_output += block.text
+        tokens_used = completion.usage.input_tokens + completion.usage.output_tokens
 
-        tokens_used = response.usage.input_tokens + response.usage.output_tokens
-
-        return text_output, tokens_used
+        # Serialize back to JSON string for compatibility with existing flow
+        return result.model_dump_json(), tokens_used
 
     def _validate_output(
         self, output: str
@@ -695,17 +694,14 @@ REGRAS CRITICAS:
         )
 
         if self.provider == "claude":
-            response = self.claude_client.messages.create(
+            result, completion = self.claude_instructor.messages.create_with_completion(
                 model=settings.anthropic_model,
                 max_tokens=2000,
+                response_model=GeminiAnalysisOutput,
                 messages=[{"role": "user", "content": retry_prompt}],
             )
-            text_output = ""
-            for block in response.content:
-                if block.type == "text":
-                    text_output += block.text
-            tokens_used = response.usage.input_tokens + response.usage.output_tokens
-            return text_output, tokens_used
+            tokens_used = completion.usage.input_tokens + completion.usage.output_tokens
+            return result.model_dump_json(), tokens_used
         else:
             response = self.gemini_model.generate_content(
                 retry_prompt,

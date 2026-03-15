@@ -7,8 +7,9 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
+import instructor
 from openai import OpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -173,7 +174,7 @@ IMPORTANTE:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY nao configurado")
 
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.client = instructor.from_openai(OpenAI(api_key=settings.openai_api_key))
         self.budget = budget_tools
 
     def generate(
@@ -228,15 +229,9 @@ IMPORTANTE:
             # Determina nicho
             target_niche = niche or video.profile.niche if video.profile else "geral"
 
-            # Gera estrategia
+            # Gera estrategia com structured output (instructor cuida da validacao)
             print(f"[Strategist] Gerando estrategia para video {video_id}...")
-            strategy_output, tokens_used = self._call_gpt4o(video, analysis, target_niche)
-
-            # Valida output
-            is_valid, validated_output, validation_errors = self._validate_output(strategy_output)
-
-            if not is_valid or not validated_output:
-                raise ValueError(f"Output invalido: {validation_errors}")
+            validated_output, tokens_used = self._call_gpt4o(video, analysis, target_niche)
 
             # Busca versao do prompt
             prompt_version = self._get_prompt_version(db)
@@ -373,11 +368,11 @@ IMPORTANTE:
         video: ViralVideo,
         analysis: VideoAnalysis,
         niche: str,
-    ) -> tuple[str, int]:
-        """Chama GPT-4o para geracao de estrategia.
+    ) -> tuple[StrategyOutput, int]:
+        """Chama GPT-4o para geracao de estrategia com structured output via instructor.
 
         Returns:
-            Tuple (response_text, tokens_used)
+            Tuple (validated_output, tokens_used)
         """
         prompt = self.STRATEGY_PROMPT.format(
             views=video.views_count,
@@ -391,48 +386,24 @@ IMPORTANTE:
             niche=niche,
         )
 
-        response = self.client.chat.completions.create(
+        result, completion = self.client.chat.completions.create_with_completion(
             model=settings.openai_model,
+            response_model=StrategyOutput,
             messages=[
                 {
                     "role": "system",
-                    "content": "Voce e um estrategista de conteudo viral. Responda apenas em JSON valido.",
+                    "content": "Voce e um estrategista de conteudo viral.",
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.7,
             max_tokens=2500,
+            max_retries=2,
         )
 
-        tokens = response.usage.total_tokens if response.usage else 0
+        tokens = completion.usage.total_tokens if completion.usage else 0
 
-        return response.choices[0].message.content or "", tokens
-
-    def _validate_output(
-        self, output: str
-    ) -> tuple[bool, Optional[StrategyOutput], list[str]]:
-        """Valida output do GPT-4o com Pydantic."""
-        errors = []
-
-        try:
-            json_str = output.strip()
-            if json_str.startswith("```"):
-                json_str = json_str.split("```")[1]
-                if json_str.startswith("json"):
-                    json_str = json_str[4:]
-
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            errors.append(f"JSON invalido: {e}")
-            return False, None, errors
-
-        try:
-            validated = StrategyOutput(**data)
-            return True, validated, []
-        except ValidationError as e:
-            for err in e.errors():
-                errors.append(f"{err['loc']}: {err['msg']}")
-            return False, None, errors
+        return result, tokens
 
     def _get_prompt_version(self, db: Session) -> Optional[PromptVersion]:
         """Busca versao ativa do prompt de estrategia."""
